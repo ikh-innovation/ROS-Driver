@@ -12,6 +12,7 @@
 #include <roboteq_motor_controller_driver/roboteq_motor_controller_driver_node.h>
 #include <string>
 #include <sstream>
+#include <mutex>
 
 class Odometry_calc
 {
@@ -91,9 +92,10 @@ private:
 	double x_final, y_final, theta_final;
 
 	//imu variables
+	std::mutex imu_mtx_;
 	bool imu_initialized;
-	double prev_imu_yaw, imu_yaw, imu_yaw_init;
-	int imu_cnt;
+	double prev_imu_yaw, imu_yaw, imu_yaw_init{0.0};
+	int imu_cnt{0};
 
 	//funcs and callbacks
 	void encoderBCR(const roboteq_motor_controller_driver::channel_values &left_ticks);
@@ -115,13 +117,13 @@ Odometry_calc::Odometry_calc(ros::NodeHandle pn)
 	pn.param("encoder_max", encoder_max, 2147483648.0);
 	ROS_INFO_STREAM("encoder_max: " << encoder_max);
 	// pn.param("wrapping_enabled", wrapping_enabled, false);
- // 	ROS_INFO_STREAM("wrapping_enabled: " << wrapping_enabled);
+	// ROS_INFO_STREAM("wrapping_enabled: " << wrapping_enabled);
 	pn.param("wrp_lim", wrp_lim, 0.3);
- 	ROS_INFO_STREAM("wrp_lim: " << wrp_lim);
+	ROS_INFO_STREAM("wrp_lim: " << wrp_lim);
 	pn.param("sub_to_abs", sub_to_abs, false);
- 	ROS_INFO_STREAM("sub_to_abs: " << sub_to_abs);
+	ROS_INFO_STREAM("sub_to_abs: " << sub_to_abs);
 	pn.param("count_is_rpm", count_is_rpm, false);
- 	ROS_INFO_STREAM("count_is_rpm: " << count_is_rpm);
+	ROS_INFO_STREAM("count_is_rpm: " << count_is_rpm);
 
 	//////////////////////
 	//General parameters//
@@ -131,10 +133,10 @@ Odometry_calc::Odometry_calc(ros::NodeHandle pn)
 	pn.param("wheel_circumference", wheel_circumference, 1.1623895);
 	ROS_INFO_STREAM("wheel_circumference: " << wheel_circumference);
 	pn.param("track_width", track_width, 0.9925);
- 	ROS_INFO_STREAM("track_width: " << track_width);
+	ROS_INFO_STREAM("track_width: " << track_width);
 	pn.param("enable_imu_yaw", enable_imu_yaw, false);
- 	ROS_INFO_STREAM("enable_imu_yaw: " << enable_imu_yaw);
- 	pn.param<std::string>("imu_topic", imu_topic, "imu/data");
+	ROS_INFO_STREAM("enable_imu_yaw: " << enable_imu_yaw);
+	pn.param<std::string>("imu_topic", imu_topic, "imu/data");
 	ROS_INFO_STREAM("imu_topic: " << imu_topic);
 
 	pn.param("imu_discarded", imu_discarded, 100);
@@ -143,9 +145,9 @@ Odometry_calc::Odometry_calc(ros::NodeHandle pn)
 	ROS_INFO_STREAM("tf_publish: " << tf_publish);
 	pn.param<std::string>("odom_topic", odom_topic, "odom");
 	ROS_INFO_STREAM("odom_topic: " << odom_topic);
- 	pn.param<std::string>("tf_child_frame", tf_child_frame, "base_footprint");
+	pn.param<std::string>("tf_child_frame", tf_child_frame, "base_footprint");
 	ROS_INFO_STREAM("tf_child_frame: " << tf_child_frame);
- 	pn.param<std::string>("tf_header_frame", tf_header_frame, "map");
+	pn.param<std::string>("tf_header_frame", tf_header_frame, "map");
 	ROS_INFO_STREAM("tf_header_frame: " << tf_header_frame);
 
 	pn.param<std::string>("odom_frame", odom_frame, "odom");
@@ -264,8 +266,7 @@ void Odometry_calc::update()
 	//////////////////////////////////////
 	//calculate current and elapsed time//
 	//////////////////////////////////////
-	now = ros::Time::now();
-	elapsed = now.toSec() - then.toSec();
+	elapsed = (now - then).toSec();
 
 	//////////////////////////////////////////////////
 	//calculate the distances covered left and right//
@@ -291,14 +292,10 @@ void Odometry_calc::update()
 
 	}
 	
-
-
-
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 	//calculate the distance and angle covered, as well as the rates of change and total displacements//
 	////////////////////////////////////////////////////////////////////////////////////////////////////
-
-		
+	
 	if (DeltaS != 0)
 	{
 		DeltaX = DeltaS * cos(theta_final + (DeltaTh / 2));
@@ -308,16 +305,25 @@ void Odometry_calc::update()
 	}
 
 	//angular
-	if ((!enable_imu_yaw) || (enable_imu_yaw && !imu_initialized))
 	{
-		DeltaTh = (d_left - d_right) / track_width; // th is tan(th)
-		dr = DeltaTh / elapsed;
-		theta_final = theta_final + DeltaTh;
-	}
-	else
-	{
-		theta_final = imu_yaw;
-    	dr = (imu_yaw - prev_imu_yaw)/elapsed;
+		std::lock_guard<std::mutex> imu_lock(imu_mtx_);     
+    
+		if ((!enable_imu_yaw) || (enable_imu_yaw && !imu_initialized))
+		{
+			DeltaTh = (d_left - d_right) / track_width; // th is tan(th)
+			dr = DeltaTh / elapsed;
+			theta_final = theta_final + DeltaTh;
+		}
+		else
+		{
+			theta_final = imu_yaw;
+			dr = theta_final - prev_imu_yaw;
+			if (abs(dr) > 1e-7)
+			{
+				dr = (abs(dr)/dr * std::min(std::fmod(std::fmod(-abs(dr),M_PI)+M_PI,M_PI), std::fmod(abs(dr),M_PI)))/elapsed;
+			}			
+			prev_imu_yaw = theta_final;
+		}
 	}
 
 	//wrap angle values between -180 and 1800 degrees
@@ -399,6 +405,7 @@ void Odometry_calc::encoderBCR(const roboteq_motor_controller_driver::channel_va
 {
 	right_count = ticks.value[0];
 	left_count = ticks.value[1];
+	now = ticks.header.stamp;
 	update();
 	OdomPub();
 	if (tf_publish)
@@ -409,46 +416,48 @@ void Odometry_calc::encoderBCR(const roboteq_motor_controller_driver::channel_va
 
 void Odometry_calc::imu_setup()
 {
-  if (enable_imu_yaw)
-  {
-    imu_sub = n.subscribe(imu_topic, 100, &Odometry_calc::imu_callback, this);
-  };
+	if (enable_imu_yaw)
+	{
+		imu_sub = n.subscribe(imu_topic, 100, &Odometry_calc::imu_callback, this);
+	}
 }
 
 void Odometry_calc::imu_callback(const sensor_msgs::Imu &imu)
 {
-	prev_imu_yaw = imu_yaw;
-  //TF quaternion
-  tf::Quaternion q(
-      imu.orientation.x,
-      imu.orientation.y,
-      imu.orientation.z,
-      imu.orientation.w);
+	//TF quaternion
+	tf::Quaternion q(
+		imu.orientation.x,
+		imu.orientation.y,
+		imu.orientation.z,
+		imu.orientation.w);
 
-  // TF matrix
-  tf::Matrix3x3 m(q);
-  // Calculate ROLL PITCH YAW from quaternion
-  double roll, pitch, yaw;
-  m.getRPY(roll, pitch, yaw);
-  // Check if yaw is NaN: When yaw= NaN, then the statement yaw!=yaw is always True
-  if (yaw == yaw)
-  {
-    if (imu_cnt < imu_discarded)
-    {
-      imu_yaw_init = imu_yaw_init + yaw;
-      imu_cnt++;
-	  if (imu_cnt >= imu_discarded)
-      {
-		ROS_WARN("Odometry YAW initialized!");
-        imu_yaw_init /= (double)(imu_cnt);
-      }
-    }
-    else
-    {
-      imu_yaw = (double)yaw - (double)imu_yaw_init;
-	  imu_initialized = true;
-    }
-  }
+	// TF matrix
+	tf::Matrix3x3 m(q);
+	// Calculate ROLL PITCH YAW from quaternion
+	double roll, pitch, yaw;
+	m.getRPY(roll, pitch, yaw);
+	// Check if yaw is NaN: When yaw= NaN, then the statement yaw!=yaw is always True
+	if (yaw == yaw)
+	{
+		std::lock_guard<std::mutex> imu_lock(imu_mtx_); 
+		if (imu_cnt < imu_discarded)
+		{
+			imu_yaw_init = imu_yaw_init + yaw;
+			imu_cnt++;
+			if (imu_cnt >= imu_discarded)
+			{
+				ROS_WARN("Odometry YAW initialized!");
+				imu_yaw_init /= (double)(imu_cnt);
+				imu_yaw = imu_yaw_init;			
+				prev_imu_yaw = imu_yaw_init;
+				imu_initialized = true;
+			}
+		}
+		else
+		{
+			imu_yaw = (double)yaw - (double)imu_yaw_init;
+		}
+	}
 }
 
 int main(int argc, char **argv)
