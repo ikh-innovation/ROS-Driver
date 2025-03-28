@@ -15,6 +15,7 @@
 #include <std_msgs/String.h>
 #include <std_srvs/Trigger.h>
 #include <geometry_msgs/Twist.h>
+#include <std_msgs/UInt8MultiArray.h>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string/split.hpp>
@@ -24,6 +25,7 @@
 #include <roboteq_motor_controller_driver/command_srv.h>
 #include <roboteq_motor_controller_driver/channel_values.h>
 #include <roboteq_motor_controller_driver/maintenance_srv.h>
+#include <roboteq_motor_controller_driver/SetInt.h>
 
 template <typename T> float sgn(T val) {
     return (T(0) < val) - (val < T(0));
@@ -56,6 +58,7 @@ private:
 	void channel_1_vel_callback(const std_msgs::Int16 &msg);
 	void channel_2_vel_callback(const std_msgs::Int16 &msg);
 	void skid_steering_vel_callback(const geometry_msgs::Twist &msg);
+	bool disbale_motor(roboteq_motor_controller_driver::SetInt::Request &req, roboteq_motor_controller_driver::SetInt::Response &res);
 	bool resetstoservice(std_srvs::Trigger::Request &request, std_srvs::Trigger::Response &response);
 	void rpm_mapping(const double &right_speed, const double &left_speed, double &right_speed_cr, double &left_speed_cr);
 	void formQuery(std::string, std::map<std::string, std::string> &, std::vector<ros::Publisher> &, std::stringstream &);	
@@ -72,12 +75,14 @@ private:
 	ros::ServiceServer commandsrv;
 	ros::ServiceServer resetstosrv;
 	ros::ServiceServer maintenancesrv;
+	ros::ServiceServer disbale_motor_srv;
 
 	ros::Subscriber cmd_vel_sub;
 	ros::Subscriber cmd_vel_channel_1_sub;
 	ros::Subscriber cmd_vel_channel_2_sub;
 
 	ros::Publisher i2t_pub_;
+	ros::Publisher enabled_motors_pub_;
 	ros::Publisher serial_read_pub_;
 
 	std::vector<int> f_list; // a list of frequencies for the queries to be published
@@ -109,7 +114,8 @@ private:
 	std::vector<double> amp_limit_;
 	std::vector<double> i2t_limit_;
 	std::vector<double> time_amp_limit_;
-	std::vector<double> nominal_current_;	
+	std::vector<double> nominal_current_;
+	std::vector<bool> enabled_channel_ = {true,true};
 	roboteq_motor_controller_driver::channel_values motor_amps_;
 	roboteq_motor_controller_driver::channel_values runtime_status_flags_;	
 };
@@ -201,6 +207,9 @@ void RoboteqDriver::initialize()
 			reduction_ratio = 70;
 		}
 		nh_.getParam("wheel_circumference", wheel_circumference);
+		
+		
+		
 		ROS_INFO_STREAM("Driver controls two motors moving a skid steering vehicle.");
 		cmd_vel_sub = nh_.subscribe("cmd_vel", 10, &RoboteqDriver::skid_steering_vel_callback, this);
 	}
@@ -251,7 +260,54 @@ void RoboteqDriver::initialize()
 		}
 	}
 
+	// publish status of active motors
+	std_msgs::UInt8MultiArray msg;
+	msg.data.push_back(1);
+	msg.data.push_back(1);
+	enabled_motors_pub_ = nh_.advertise<std_msgs::UInt8MultiArray>("enabled_motors", 10, true);
+	enabled_motors_pub_.publish(msg);
+	
+	// initialize service of disable motors functionality
+	disbale_motor_srv = nh_.advertiseService("disable_channel", &RoboteqDriver::disbale_motor, this);
+
 	connect();
+}
+
+
+bool RoboteqDriver::disbale_motor(roboteq_motor_controller_driver::SetInt::Request &req, roboteq_motor_controller_driver::SetInt::Response &res)
+{
+	if (req.data == 1 || req.data == 0)
+	{
+		ROS_WARN("Disabling motor %d", req.data);
+		enabled_channel_[req.data] = false;
+	}
+	else if (req.data == 2)
+	{
+		ROS_WARN("Disabling all motors");
+		enabled_channel_[0] = false;
+		enabled_channel_[1] = false;
+	}
+	else if (req.data == -1)
+	{
+		ROS_WARN("Enabling all motors");
+		enabled_channel_[0] = true;
+		enabled_channel_[1] = true;
+	}
+	else
+	{
+		ROS_ERROR("Invalid channel number: %d", req.data);
+		res.success = false;
+		return true;
+	}
+	
+
+	std_msgs::UInt8MultiArray msg;
+	msg.data.push_back(enabled_channel_[0]);
+	msg.data.push_back(enabled_channel_[1]);
+	enabled_motors_pub_.publish(msg);
+
+	res.success = true;
+	return true;
 }
 
 void RoboteqDriver::rpm_mapping(const double &right_speed, const double &left_speed, double &right_speed_cr, double &left_speed_cr)
@@ -328,8 +384,14 @@ void RoboteqDriver::skid_steering_vel_callback(const geometry_msgs::Twist &msg)
 	right_cmd << "!S 1 " << (int)(right_rpm) << "\r";
 	left_cmd << "!S 2 " << (int)(left_rpm) << "\r";
 
-	ser_.write(right_cmd.str());
-	ser_.write(left_cmd.str());
+	if (enabled_channel_[0])
+	{
+		ser_.write(right_cmd.str());
+	}
+	if (enabled_channel_[1])
+	{
+		ser_.write(left_cmd.str());
+	}
 	ser_.flush();
 }
 
@@ -351,8 +413,14 @@ void RoboteqDriver::dual_vel_callback(const std_msgs::Int16 &msg)
 		right_cmd << "!S 2 " << cmd << "\r";
 		left_cmd << "!S 1 " << cmd << "\r";
 	}
-	ser_.write(right_cmd.str());
-	ser_.write(left_cmd.str());
+	if (enabled_channel_[0])
+	{
+		ser_.write(left_cmd.str());
+	}
+	if (enabled_channel_[1])
+	{
+		ser_.write(right_cmd.str());
+	}
 	ser_.flush();
 }
 
@@ -377,7 +445,10 @@ void RoboteqDriver::channel_1_vel_callback(const std_msgs::Int16 &msg)
 		ROS_ERROR("Channel 1: Not Valid Motor Type");
 	}
 
-	ser_.write(channel_1_cmd.str());
+	if (enabled_channel_[0])
+	{
+		ser_.write(channel_1_cmd.str());	
+	}
 	ser_.flush();
 }
 
@@ -401,7 +472,10 @@ void RoboteqDriver::channel_2_vel_callback(const std_msgs::Int16 &msg)
 		ROS_ERROR("Channel 2: Not Valid Motor Type");
 	}
 
-	ser_.write(channel_2_cmd.str());
+	if (enabled_channel_[1])
+	{
+		ser_.write(channel_2_cmd.str());
+	}
 	ser_.flush();
 }
 
