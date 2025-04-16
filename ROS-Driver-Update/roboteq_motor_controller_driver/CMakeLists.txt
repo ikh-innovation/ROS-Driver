@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   rospy
   tf
+  ikh_ros_msgs
   message_generation
 )
 
@@ -61,7 +62,6 @@ add_service_files(
    config_srv.srv
    command_srv.srv
    maintenance_srv.srv
-   SetInt.srv
 #   Service2.srv
  )
 

@@ -1,18 +1,17 @@
-#include "ros/ros.h"
-#include "ros/console.h"
-#include "std_msgs/String.h"
-#include "std_msgs/Int64.h"
-#include "std_msgs/Int16.h"
-#include <tf/transform_broadcaster.h>
-#include <tf/tf.h>
-#include <nav_msgs/Odometry.h>
-#include <geometry_msgs/Quaternion.h>
-#include <sensor_msgs/Imu.h>
+#include <mutex>
 #include <math.h>
-#include <roboteq_motor_controller_driver/roboteq_motor_controller_driver_node.h>
 #include <string>
 #include <sstream>
-#include <mutex>
+#include <tf/tf.h>
+#include <ros/ros.h>
+#include <ros/console.h>
+#include <std_msgs/Int64.h>
+#include <std_msgs/String.h>
+#include <sensor_msgs/Imu.h>
+#include <nav_msgs/Odometry.h>
+#include <geometry_msgs/Quaternion.h>
+#include <tf/transform_broadcaster.h>
+#include <roboteq_motor_controller_driver/channel_values.h>
 
 class Odometry_calc
 {
