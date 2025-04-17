@@ -67,8 +67,6 @@ private:
 	bool commandservice(roboteq_motor_controller_driver::command_srv::Request &request, roboteq_motor_controller_driver::command_srv::Response &response);
 	bool maintenanceservice(roboteq_motor_controller_driver::maintenance_srv::Request &request, roboteq_motor_controller_driver::maintenance_srv::Response &response);
 
-	ros::NodeHandle n;
-	ros::NodeHandle nh;
 	ros::NodeHandle nh_;
 	ros::NodeHandle nh_priv_;
 
@@ -569,11 +567,10 @@ void RoboteqDriver::run()
 
 void RoboteqDriver::initialize_services()
 {
-	n = ros::NodeHandle();
-	configsrv = n.advertiseService("config_service", &RoboteqDriver::configservice, this);
-	commandsrv = n.advertiseService("command_service", &RoboteqDriver::commandservice, this);
-	maintenancesrv = n.advertiseService("maintenance_service", &RoboteqDriver::maintenanceservice, this);
-	resetstosrv = n.advertiseService("reset_sto",&RoboteqDriver::resetstoservice, this);
+	configsrv = nh_priv_.advertiseService("config_service", &RoboteqDriver::configservice, this);
+	commandsrv = nh_priv_.advertiseService("command_service", &RoboteqDriver::commandservice, this);
+	maintenancesrv = nh_priv_.advertiseService("maintenance_service", &RoboteqDriver::maintenanceservice, this);
+	resetstosrv = nh_priv_.advertiseService("reset_sto",&RoboteqDriver::resetstoservice, this);
 }
 
 bool RoboteqDriver::configservice(roboteq_motor_controller_driver::config_srv::Request &request, roboteq_motor_controller_driver::config_srv::Response &response)
