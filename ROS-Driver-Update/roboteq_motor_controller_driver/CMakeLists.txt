@@ -13,7 +13,6 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   rospy
   tf
-  ikh_ros_msgs
   message_generation
 )
 
@@ -59,6 +58,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate services in the 'srv' folder
 add_service_files(
    FILES
+   SetInt.srv
    config_srv.srv
    command_srv.srv
    maintenance_srv.srv

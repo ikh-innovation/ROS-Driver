@@ -15,7 +15,6 @@
 #include <std_msgs/Int16.h>
 #include <std_msgs/String.h>
 #include <std_srvs/Trigger.h>
-#include <ikh_ros_msgs/SetInt.h>
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/UInt8MultiArray.h>
 
@@ -23,6 +22,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 
+#include <roboteq_motor_controller_driver/SetInt.h>
 #include <roboteq_motor_controller_driver/config_srv.h>
 #include <roboteq_motor_controller_driver/command_srv.h>
 #include <roboteq_motor_controller_driver/channel_values.h>
@@ -58,11 +58,11 @@ private:
 	void dual_vel_callback(const std_msgs::Int16 &msg);
 	void channel_1_vel_callback(const std_msgs::Int16 &msg);
 	void channel_2_vel_callback(const std_msgs::Int16 &msg);
-	void skid_steering_vel_callback(const geometry_msgs::Twist &msg);
-	bool disable_motor(ikh_ros_msgs::SetInt::Request &req, ikh_ros_msgs::SetInt::Response &res);
+	void skid_steering_vel_callback(const geometry_msgs::Twist &msg);	
 	bool resetstoservice(std_srvs::Trigger::Request &request, std_srvs::Trigger::Response &response);
 	void rpm_mapping(const double &right_speed, const double &left_speed, double &right_speed_cr, double &left_speed_cr);
-	void formQuery(std::string, std::map<std::string, std::string> &, std::vector<ros::Publisher> &, std::stringstream &);	
+	void formQuery(std::string, std::map<std::string, std::string> &, std::vector<ros::Publisher> &, std::stringstream &);
+	bool disable_motor(roboteq_motor_controller_driver::SetInt::Request &req, roboteq_motor_controller_driver::SetInt::Response &res);
 	bool configservice(roboteq_motor_controller_driver::config_srv::Request &request, roboteq_motor_controller_driver::config_srv::Response &response);
 	bool commandservice(roboteq_motor_controller_driver::command_srv::Request &request, roboteq_motor_controller_driver::command_srv::Response &response);
 	bool maintenanceservice(roboteq_motor_controller_driver::maintenance_srv::Request &request, roboteq_motor_controller_driver::maintenance_srv::Response &response);
@@ -278,7 +278,7 @@ void RoboteqDriver::initialize()
 }
 
 
-bool RoboteqDriver::disable_motor(ikh_ros_msgs::SetInt::Request &req, ikh_ros_msgs::SetInt::Response &res)
+bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Request &req, roboteq_motor_controller_driver::SetInt::Response &res)
 {
 	if (req.data == 0 || req.data == 1)
 	{
