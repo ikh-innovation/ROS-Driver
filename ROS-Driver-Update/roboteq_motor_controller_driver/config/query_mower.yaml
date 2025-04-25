@@ -7,7 +7,8 @@ channel_mode: dual
 # motor_type:  set_speed
 motor_1_type: set_speed
 motor_2_type: set_speed
-
+motor_1_enabled: true
+motor_2_enabled: true
 
 query0:
  motor_amps : ?A 

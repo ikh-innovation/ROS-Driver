@@ -156,6 +156,9 @@ void RoboteqDriver::initialize()
 		safe_speed = false;
 	}
 
+	enabled_channel_.channel_1.store(nh_.param("motor_1_enabled", true));
+	enabled_channel_.channel_2.store(nh_.param("motor_2_enabled", true));
+
 	if (channel_mode == "dual")
 	{
 		if (!nh_.getParam("motor_type", motor_type))
