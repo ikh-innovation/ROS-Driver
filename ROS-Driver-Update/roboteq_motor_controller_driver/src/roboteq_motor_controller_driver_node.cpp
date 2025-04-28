@@ -394,17 +394,11 @@ void RoboteqDriver::skid_steering_vel_callback(const geometry_msgs::Twist &msg)
 	std::stringstream right_cmd;
 	std::stringstream left_cmd;
 
-	right_cmd << "!S 1 " << (int)(right_rpm) << "\r";
-	left_cmd << "!S 2 " << (int)(left_rpm) << "\r";
+	right_cmd << "!S 1 " << (enabled_channel_.channel_1.load() ? (int)(right_rpm) : 0) << "\r";
+	left_cmd << "!S 2 " << (enabled_channel_.channel_2.load() ? (int)(left_rpm) : 0) << "\r";
 
-	if (enabled_channel_.channel_1.load())
-	{
-		ser_.write(right_cmd.str());
-	}
-	if (enabled_channel_.channel_2.load())
-	{
-		ser_.write(left_cmd.str());
-	}
+	ser_.write(right_cmd.str());
+	ser_.write(left_cmd.str());
 	ser_.flush();
 }
 
@@ -418,23 +412,17 @@ void RoboteqDriver::dual_vel_callback(const std_msgs::Int16 &msg)
 
 	if (motor_type == "go_to_speed")
 	{
-		right_cmd << "!G 2 " << cmd << "\r";
-		left_cmd << "!G 1 " << cmd << "\r";
+		right_cmd << "!G 2 " << (enabled_channel_.channel_2.load() ? cmd : 0) << "\r";
+		left_cmd << "!G 1 " << (enabled_channel_.channel_1.load() ? cmd : 0) << "\r";
 	}
 	else if (motor_type == "set_speed")
 	{
-		right_cmd << "!S 2 " << cmd << "\r";
-		left_cmd << "!S 1 " << cmd << "\r";
+		right_cmd << "!S 2 " << (enabled_channel_.channel_2.load() ? cmd : 0) << "\r";
+		left_cmd << "!S 1 " << (enabled_channel_.channel_1.load() ? cmd : 0) << "\r";
 	}
 	
-	if (enabled_channel_.channel_1.load())
-	{
-		ser_.write(left_cmd.str());
-	}
-	if (enabled_channel_.channel_2.load())
-	{
-		ser_.write(right_cmd.str());
-	}
+	ser_.write(left_cmd.str());
+	ser_.write(right_cmd.str());
 	ser_.flush();
 }
 
@@ -447,22 +435,19 @@ void RoboteqDriver::channel_1_vel_callback(const std_msgs::Int16 &msg)
 
 	if (motor_1_type == "go_to_speed")
 	{
-		channel_1_cmd << "!G 1 " << cmd << "\r";
+		channel_1_cmd << "!G 1 " << (enabled_channel_.channel_1.load() ? cmd : 0) << "\r";
 	}
 	else if (motor_1_type == "set_speed")
 	{
-		channel_1_cmd << "!S 1 " << cmd << "\r";
+		channel_1_cmd << "!S 1 " << (enabled_channel_.channel_1.load() ? cmd : 0) << "\r";
 	}
-
 	else
 	{
 		ROS_ERROR("Channel 1: Not Valid Motor Type");
+		return;
 	}
 
-	if (enabled_channel_.channel_1.load())
-	{
-		ser_.write(channel_1_cmd.str());	
-	}
+	ser_.write(channel_1_cmd.str());
 	ser_.flush();
 }
 
@@ -475,21 +460,19 @@ void RoboteqDriver::channel_2_vel_callback(const std_msgs::Int16 &msg)
 
 	if (motor_2_type == "go_to_speed")
 	{
-		channel_2_cmd << "!G 2 " << cmd << "\r";
+		channel_2_cmd << "!G 2 " << (enabled_channel_.channel_2.load() ? cmd : 0) << "\r";
 	}
 	else if (motor_2_type == "set_speed")
 	{
-		channel_2_cmd << "!S 2 " << cmd << "\r";
+		channel_2_cmd << "!S 2 " << (enabled_channel_.channel_2.load() ? cmd : 0) << "\r";
 	}
 	else
 	{
 		ROS_ERROR("Channel 2: Not Valid Motor Type");
+		return;
 	}
 
-	if (enabled_channel_.channel_2.load())
-	{
-		ser_.write(channel_2_cmd.str());
-	}
+	ser_.write(channel_2_cmd.str());
 	ser_.flush();
 }
 
