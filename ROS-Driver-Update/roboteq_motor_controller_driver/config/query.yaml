@@ -1,4 +1,5 @@
-port : "/dev/SBL2360T"
+#port : "/dev/SBL2360T"
+port : "/dev/ttyACM0"
 # port : "/dev/ttyS1"
 baud : 115200
 
@@ -29,6 +30,8 @@ queryH:
  runtime_status_flag : ?FM
  status_flag : ?FS
  phase_amps : ?PHA
+ temperatures: ?T
+ cpu_usage: ?MCU
 
 # amper_limit : ?ALIM  
 # motor_amps2 : ?MA

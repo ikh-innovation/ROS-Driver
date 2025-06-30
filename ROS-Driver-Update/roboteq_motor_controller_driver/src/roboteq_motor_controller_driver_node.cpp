@@ -90,7 +90,6 @@ private:
 
 	void connect()
 	{
-
 		try
 		{
 
@@ -173,6 +172,7 @@ private:
 	ros::ServiceServer configsrv;
 	ros::ServiceServer commandsrv;
 	ros::ServiceServer maintenancesrv;
+	ros::ServiceServer arbitrary_command_srv;
 
 	bool configservice(roboteq_motor_controller_driver::config_srv::Request &request, roboteq_motor_controller_driver::config_srv::Response &response)
 	{
@@ -182,6 +182,22 @@ private:
 		ser.write(str.str());
 		ser.flush();
 		response.result = str.str();
+
+		ROS_INFO_STREAM(response.result);
+		return true;
+	}
+
+	bool arbitrary_command_service(roboteq_motor_controller_driver::command_srv::Request &request, roboteq_motor_controller_driver::command_srv::Response &response)
+	{
+		std::stringstream str;
+		str << request.userInput << " " << request.channel << " " << request.value;
+    std::string command_str = str.str();
+		ser.write(command_str);
+		ser.flush();
+    command_str[0] = '~';
+		ser.write(command_str);
+		ser.flush();
+		response.result = ser.read(ser.available());
 
 		ROS_INFO_STREAM(response.result);
 		return true;
@@ -218,6 +234,7 @@ private:
 		configsrv = n.advertiseService("config_service", &RoboteqDriver::configservice, this);
 		commandsrv = n.advertiseService("command_service", &RoboteqDriver::commandservice, this);
 		maintenancesrv = n.advertiseService("maintenance_service", &RoboteqDriver::maintenanceservice, this);
+		arbitrary_command_srv = n.advertiseService("arbitrary_command_service", &RoboteqDriver::arbitrary_command_service, this);
 	}
 
 	void run()
@@ -260,12 +277,12 @@ private:
 			publisherVecH.push_back(nh.advertise<roboteq_motor_controller_driver::channel_values>(KH_vector[i], 100));
 		}
 
-		ser.write(ss0.str());
-		ser.write(ss1.str());
-		ser.write(ss2.str());
-		ser.write(ss3.str());
+    ser.write(ss0.str());
+    ser.write(ss1.str());
+    ser.write(ss2.str());
+    ser.write(ss3.str());
 
-		ser.flush();
+    ser.flush();
 		int count = 0;
 		read_publisher = nh.advertise<std_msgs::String>("read", 1000);
 		sleep(2);

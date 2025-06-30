@@ -1,5 +1,6 @@
 # port : "/dev/ttyS0"
-port : "/dev/SDC2160"
+# port : "/dev/SDC2160"
+port : "/dev/ttyACM1"
 baud : 115200
 
 # specify robot track width in meters
@@ -22,6 +23,7 @@ queryH:
  battery_amps : ?BA
  power : ?P          
  fault_flag : ?FF 
+ temp : ?T 
 # motor_amps2 : ?MA
 # motor_command2 : ?FM
 # hall_count2 : ?FM
