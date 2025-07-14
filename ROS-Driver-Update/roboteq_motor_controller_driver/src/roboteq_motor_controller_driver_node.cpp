@@ -66,6 +66,7 @@ private:
 	bool configservice(roboteq_motor_controller_driver::config_srv::Request &request, roboteq_motor_controller_driver::config_srv::Response &response);
 	bool commandservice(roboteq_motor_controller_driver::command_srv::Request &request, roboteq_motor_controller_driver::command_srv::Response &response);
 	bool maintenanceservice(roboteq_motor_controller_driver::maintenance_srv::Request &request, roboteq_motor_controller_driver::maintenance_srv::Response &response);
+	bool arbitrary_command_service(roboteq_motor_controller_driver::maintenance_srv::Request &request, roboteq_motor_controller_driver::maintenance_srv::Response &response);
 
 	ros::NodeHandle nh_;
 	ros::NodeHandle nh_priv_;
@@ -75,6 +76,7 @@ private:
 	ros::ServiceServer resetstosrv;
 	ros::ServiceServer maintenancesrv;
 	ros::ServiceServer disbale_motor_srv;
+	ros::ServiceServer arbitrary_command_srv;
 
 	ros::Subscriber cmd_vel_sub;
 	ros::Subscriber cmd_vel_channel_1_sub;
@@ -273,9 +275,6 @@ void RoboteqDriver::initialize()
 	msg.data.push_back(1);
 	enabled_motors_pub_ = nh_.advertise<std_msgs::UInt8MultiArray>("enabled_motors", 10, true);
 	enabled_motors_pub_.publish(msg);
-	
-	// initialize service of disable motors functionality
-	disbale_motor_srv = nh_.advertiseService("disable_channel", &RoboteqDriver::disable_motor, this);
 
 	connect();
 }
@@ -320,6 +319,20 @@ bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Reque
 	enabled_motors_pub_.publish(msg);
 
 	res.success = true;
+	return true;
+}
+
+bool RoboteqDriver::arbitrary_command_service(roboteq_motor_controller_driver::maintenance_srv::Request &request, roboteq_motor_controller_driver::maintenance_srv::Response &response)
+{
+	std::stringstream str;
+	str << request.userInput << "\r";
+	std::string command_str = str.str();
+	std::cout << command_str << std::endl;
+	ser_.write(command_str);
+	ser_.flush();
+	ros::Duration(0.1).sleep();
+	response.result = ser_.read(ser_.available());
+	ROS_INFO_STREAM(response.result);
 	return true;
 }
 
@@ -557,6 +570,10 @@ void RoboteqDriver::initialize_services()
 	commandsrv = nh_priv_.advertiseService("command_service", &RoboteqDriver::commandservice, this);
 	maintenancesrv = nh_priv_.advertiseService("maintenance_service", &RoboteqDriver::maintenanceservice, this);
 	resetstosrv = nh_priv_.advertiseService("reset_sto",&RoboteqDriver::resetstoservice, this);
+	// initialize service of disable motors functionality
+	disbale_motor_srv = nh_.advertiseService("disable_channel", &RoboteqDriver::disable_motor, this);
+	// service to send commands
+	arbitrary_command_srv = nh_.advertiseService("arbitrary_command_service", &RoboteqDriver::arbitrary_command_service, this);
 }
 
 bool RoboteqDriver::configservice(roboteq_motor_controller_driver::config_srv::Request &request, roboteq_motor_controller_driver::config_srv::Response &response)
@@ -825,7 +842,16 @@ void RoboteqDriver::read_roboteq_output()
 		message = message.substr(0, message.size()-1);
 
 		// Decode
-		frequency_index = boost::lexical_cast<int>(message[2]);
+		try
+		{
+			frequency_index = boost::lexical_cast<int>(message[2]);
+		}
+		catch (const std::exception &e)
+		{
+			ROS_ERROR_STREAM(tag << "Garbage data on Serial " << message);
+			std::cerr << e.what() << '\n';
+			continue;
+		}
 
 		try
 		{
@@ -847,7 +873,6 @@ void RoboteqDriver::read_roboteq_output()
 					}
 					catch (const std::exception &e)
 					{
-
 						ROS_ERROR_STREAM(tag << "Garbage data on Serial " << message << "//" << query_fields[j] << "//" << sub_query_fields[k]);
 						std::cerr << e.what() << '\n';
 						break;
