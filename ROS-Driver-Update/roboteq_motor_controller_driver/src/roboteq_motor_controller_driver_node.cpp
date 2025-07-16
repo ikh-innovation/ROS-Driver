@@ -50,15 +50,15 @@ public:
 	void run();
 
 private:	
-	void connect();
-	void initialize();
+	bool connect();
+	void setup_queries();
 	bool read_i2t_parameters();
 	void read_roboteq_output();
-	void initialize_services();
 	void dual_vel_callback(const std_msgs::Int16 &msg);
 	void channel_1_vel_callback(const std_msgs::Int16 &msg);
 	void channel_2_vel_callback(const std_msgs::Int16 &msg);
-	void skid_steering_vel_callback(const geometry_msgs::Twist &msg);	
+	void skid_steering_vel_callback(const geometry_msgs::Twist &msg);
+	template<typename T> bool setup(const std::string& cmd, const T& value);
 	bool resetstoservice(std_srvs::Trigger::Request &request, std_srvs::Trigger::Response &response);
 	void rpm_mapping(const double &right_speed, const double &left_speed, double &right_speed_cr, double &left_speed_cr);
 	void formQuery(std::string, std::map<std::string, std::string> &, std::vector<ros::Publisher> &, std::stringstream &);
@@ -67,7 +67,7 @@ private:
 	bool commandservice(roboteq_motor_controller_driver::command_srv::Request &request, roboteq_motor_controller_driver::command_srv::Response &response);
 	bool maintenanceservice(roboteq_motor_controller_driver::maintenance_srv::Request &request, roboteq_motor_controller_driver::maintenance_srv::Response &response);
 	bool arbitrary_command_service(roboteq_motor_controller_driver::maintenance_srv::Request &request, roboteq_motor_controller_driver::maintenance_srv::Response &response);
-
+	
 	ros::NodeHandle nh_;
 	ros::NodeHandle nh_priv_;
 
@@ -95,12 +95,16 @@ private:
 	serial::Serial ser_;
 	
 	int rate;
-	bool safe_speed;	
+	int max_rpm;
+	int motor_acceleration_rate;
+	
+	bool safe_speed;
+	
+	float safe_speed_scale;
+	
 	double max_vel_x;
 	double max_vel_ang;
 	double track_width;
-	int max_rpm = 2600;
-	float safe_speed_scale;
 	double reduction_ratio;
 	double wheel_circumference;	
 
@@ -108,6 +112,7 @@ private:
 	std::string motor_1_type;
 	std::string motor_2_type;
 	std::string channel_mode;
+	std::string operating_mode;
 
 	// I2T parameters
 	int motor_amps_index_{-1};
@@ -128,54 +133,102 @@ private:
 
 RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(nh), nh_priv_(nh_priv)
 {
-	initialize();
-}
-
-void RoboteqDriver::initialize()
-{
-	nh_.getParam("port", port);
-	nh_.getParam("baud", baud);
-
-	if (!nh_.getParam("rate", rate))
+	// Connect to the Roboteq device
+	if (!nh_.getParam("port", port))
 	{
-		rate = 5;
+		ROS_ERROR_STREAM(tag << "No port specified. Please set the 'port' parameter.");
+		exit(EXIT_FAILURE);
 	}
 
-	if (!nh_.getParam("max_rpm", max_rpm))
+	if (!nh_.getParam("baud", baud))
 	{
-		max_rpm = 2600;
+		ROS_ERROR_STREAM(tag << "No baud rate specified. Please set the 'baud' parameter.");
+		exit(EXIT_FAILURE);
 	}
 
-	if (!nh_.getParam("channel_mode", channel_mode))
+	if (!connect())
+	{
+		ROS_ERROR_STREAM(tag << "Failed to connect to Roboteq device on port: " << port);
+		exit(EXIT_FAILURE);
+	}
+
+	// Read configuration parameters
+	nh_.param<int>("max_rpm", max_rpm, 2600);
+	nh_.param<bool>("safe_speed", safe_speed, false);
+	nh_.param<int>("motor_acceleration_rate", motor_acceleration_rate, 2000);
+	nh_.param<std::string>("operating_mode", operating_mode, std::string("speed"));
+	if (operating_mode != "speed" && operating_mode != "torque")
+	{
+		ROS_ERROR_STREAM(tag << "Invalid operating mode specified. Please set 'operating_mode' to 'speed' or 'torque'.");
+		exit(EXIT_FAILURE);
+	}
+
+	enabled_channel_.channel_1.store(nh_.param<bool>("motor_1_enabled", true));
+	enabled_channel_.channel_2.store(nh_.param<bool>("motor_2_enabled", true));
+	
+	// publish status of motors
+	std_msgs::UInt8MultiArray msg;
+	msg.data.push_back(enabled_channel_.channel_1.load());
+	msg.data.push_back(enabled_channel_.channel_2.load());
+	enabled_motors_pub_ = nh_.advertise<std_msgs::UInt8MultiArray>("enabled_motors", 10, true);
+	enabled_motors_pub_.publish(msg);
+
+	// Setup roboteq
+	std::stringstream ss_gen;
+	ss_gen << "^echof 1_"; 	// Disable echo from driver
+	ss_gen << "# c_";	// Clear Buffer History of previous queries
+	ser_.write(ss_gen.str()); // Send commands
+	ser_.flush();
+	while (ser_.available())
+	{
+		ser_.read(ser_.available());
+	}
+
+	if (!setup("MXRPM", max_rpm))
+	{
+		ROS_ERROR_STREAM(tag << "Failed to set max RPM.");
+		exit(EXIT_FAILURE);
+	}
+	if (!setup("MAC", motor_acceleration_rate))
+	{
+		ROS_ERROR_STREAM(tag << "Failed to set motor acceleration rate.");
+		exit(EXIT_FAILURE);
+	}
+	if (!setup("MMOD", operating_mode == "speed" ? 1 : 5))
+	{
+		ROS_ERROR_STREAM(tag << "Failed to set operating mode.");
+		exit(EXIT_FAILURE);
+	}
+
+	// Advertise services
+	resetstosrv = nh_priv_.advertiseService("reset_sto",&RoboteqDriver::resetstoservice, this);
+	configsrv = nh_priv_.advertiseService("config_service", &RoboteqDriver::configservice, this);
+	commandsrv = nh_priv_.advertiseService("command_service", &RoboteqDriver::commandservice, this);	
+	disbale_motor_srv = nh_.advertiseService("disable_channel", &RoboteqDriver::disable_motor, this);
+	maintenancesrv = nh_priv_.advertiseService("maintenance_service", &RoboteqDriver::maintenanceservice, this);
+	arbitrary_command_srv = nh_.advertiseService("arbitrary_command_service", &RoboteqDriver::arbitrary_command_service, this);
+
+	// Setup queries
+	setup_queries();
+
+	// Subscribe to command topics
+	if (!nh_.param<std::string>("channel_mode", channel_mode, std::string("dual")))
 	{
 		ROS_INFO_STREAM("No channel mode was selected. Assigning driver as dual.");
-		channel_mode = "dual";
 	}
-
-	if (!nh_.getParam("safe_speed", safe_speed))
-	{
-
-		safe_speed = false;
-	}
-
-	enabled_channel_.channel_1.store(nh_.param("motor_1_enabled", true));
-	enabled_channel_.channel_2.store(nh_.param("motor_2_enabled", true));
 
 	if (channel_mode == "dual")
 	{
-		if (!nh_.getParam("motor_type", motor_type))
+		if (!nh_.param<std::string>("motor_type", motor_type, std::string("skid_steering")))
 		{
-			ROS_INFO_STREAM("No valid general motor type was selected. Assigning skid_steering and checking for individual motor types.");
-			motor_type = "skid_steering";
-			if (!nh_.getParam("motor_1_type", motor_1_type))
+			ROS_INFO_STREAM("No valid general motor type was selected. Assigning skid_steering.");
+			if (!nh_.param<std::string>("motor_1_type", motor_1_type, std::string("set_speed")))
 			{
 				ROS_INFO_STREAM("No valid type was found for motor 1. Assigning set_speed");
-				motor_1_type = "set_speed";
 			}
-			if (!nh_.getParam("motor_2_type", motor_2_type))
+			if (!nh_.param<std::string>("motor_2_type", motor_2_type, std::string("set_speed")))
 			{
 				ROS_INFO_STREAM("No valid type was found for motor 2. Assigning set_speed");
-				motor_2_type = "set_speed";
 			}
 		}
 		else
@@ -184,41 +237,25 @@ void RoboteqDriver::initialize()
 			motor_2_type = motor_type;
 		}
 	}
-	else // single
+	else
 	{
-		if (!nh_.getParam("motor_1_type", motor_type))
+		if (!nh_.param<std::string>("motor_1_type", motor_1_type, std::string("set_speed")))
 		{
 			ROS_INFO_STREAM("No valid type was found for motor 1. Assigning set_speed");
-			motor_1_type = "set_speed";
 		}
-		if (!nh_.getParam("motor_2_type", motor_type))
+		if (!nh_.param<std::string>("motor_2_type", motor_2_type, std::string("set_speed")))
 		{
 			ROS_INFO_STREAM("No valid type was found for motor 2. Assigning set_speed");
-			motor_2_type = "set_speed";
 		}
 	}
 
 	if (motor_type == "skid_steering")
-	{
-		nh_.getParam("track_width", track_width);
-
-		if (!nh_.getParam("max_vel_x", max_vel_x))
-		{
-			max_vel_x = 0.5;
-		}
-		
-		if (!nh_.getParam("max_vel_ang", max_vel_ang))
-		{
-			max_vel_ang = 0.5;
-		}
-		if (!nh_.getParam("reduction_ratio", reduction_ratio))
-		{
-			reduction_ratio = 70;
-		}
-		nh_.getParam("wheel_circumference", wheel_circumference);
-		
-		
-		
+	{	
+		nh_.param<double>("max_vel_x", max_vel_x, 0.5);
+		nh_.param<double>("max_vel_ang", max_vel_ang, 0.5);
+		nh_.param<double>("track_width", track_width, 0.9925);
+		nh_.param<double>("reduction_ratio", reduction_ratio, 70.0);
+		nh_.param<double>("wheel_circumference", wheel_circumference, 1.13914122);		
 		ROS_INFO_STREAM("Driver controls two motors moving a skid steering vehicle.");
 		cmd_vel_sub = nh_.subscribe("cmd_vel", 10, &RoboteqDriver::skid_steering_vel_callback, this);
 	}
@@ -268,17 +305,107 @@ void RoboteqDriver::initialize()
 			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_go_to_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
 		}
 	}
-
-	// publish status of active motors
-	std_msgs::UInt8MultiArray msg;
-	msg.data.push_back(1);
-	msg.data.push_back(1);
-	enabled_motors_pub_ = nh_.advertise<std_msgs::UInt8MultiArray>("enabled_motors", 10, true);
-	enabled_motors_pub_.publish(msg);
-
-	connect();
 }
 
+bool RoboteqDriver::connect()
+{
+	try
+	{
+		ser_.setPort(port);
+		ser_.setBaudrate(baud); // get baud as param
+		serial::Timeout to = serial::Timeout::simpleTimeout(10);
+		ser_.setTimeout(to);
+		ser_.open();
+		// Check STO signals
+		ser_.write("!STT\r");
+	}
+	catch (serial::IOException &e)
+	{
+		ROS_ERROR_STREAM("Unable to open port: " << e.what());
+		return false;
+	}
+	if (ser_.isOpen())
+	{
+		ROS_INFO_STREAM("Serial Port initialized");
+		return true;
+	}
+	else
+	{
+		ROS_INFO_STREAM("Serial Port is not open");
+		return false;
+	}
+}
+
+template<typename T>
+bool RoboteqDriver::setup(const std::string& cmd, const T& value)
+{
+	std::stringstream ss1;
+	ss1 << "^" << cmd << " 1 " << value << "\r";
+	std::stringstream ss2;
+	ss2 << "^" << cmd << " 2 " << value << "\r";
+	std::stringstream ssr;
+	ssr << "~" << cmd << "\r";
+	try {
+		ser_.write(ss1.str());
+		ser_.write(ss2.str());
+		ser_.flush();
+		ros::Duration(0.1).sleep();
+		ser_.write(ssr.str());
+		ros::Duration(0.1).sleep();
+		std::string response = ser_.read(ser_.available());
+		if (response.find(cmd + "=" + std::to_string(value) + ":" + std::to_string(value)) == std::string::npos) {
+			ROS_ERROR_STREAM(tag << "Setup command failed: " << cmd << " with value " << value << ". Response: " << response);
+			return false;
+		}
+		return true;
+	} catch (const std::exception& e) {
+		ROS_ERROR_STREAM(tag << "Setup command failed: " << e.what());
+		return false;
+	}
+}
+
+void RoboteqDriver::setup_queries()
+{
+	// Read I2T parameters
+	if (!read_i2t_parameters())
+	{
+		ROS_ERROR("Reading I2T parameters failed");
+	}	
+
+	nh_.getParam("frequency_list", f_list);
+
+	std::stringstream ss_gen;
+
+	for (int i = 0; i < f_list.size(); i++)
+	{
+		if (f_list[i] > 0)
+		{
+			ROS_INFO_STREAM(tag << "frequency " << i << " " << f_list[i]);
+			ss_gen << "/\"DF" << i << "?\",\"?\"";
+			std::map<std::string, std::string> query_map;
+			std::stringstream query_name;
+			query_name << "query" << i;
+			formQuery(query_name.str(), query_map, query_pub_, ss_gen);
+			ss_gen << "# " << 1000 / f_list[i] << "_";
+		}
+		else
+		{
+			ROS_ERROR_STREAM(tag << "Negative frequency detected " << f_list[i]);
+		}
+	}
+
+	ser_.write(ss_gen.str()); // Send commands and queries
+	ser_.flush();
+	ROS_INFO_STREAM(tag << ss_gen.str());
+	serial_read_pub_ = nh_.advertise<std_msgs::String>("read_serial", 1000);
+	i2t_pub_ = nh_.advertise<roboteq_motor_controller_driver::channel_values>("i2t", 1000);
+
+	double max_freq;
+	max_freq = *std::max_element(f_list.begin(), f_list.end());
+	ROS_INFO_STREAM(tag << " max frequency " << max_freq);
+
+	std::thread{std::bind(&RoboteqDriver::read_roboteq_output, this)}.detach();
+}
 
 bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Request &req, roboteq_motor_controller_driver::SetInt::Response &res)
 {
@@ -487,93 +614,6 @@ void RoboteqDriver::channel_2_vel_callback(const std_msgs::Int16 &msg)
 
 	ser_.write(channel_2_cmd.str());
 	ser_.flush();
-}
-
-void RoboteqDriver::connect()
-{
-	try
-	{
-		ser_.setPort(port);
-		ser_.setBaudrate(baud); // get baud as param
-		serial::Timeout to = serial::Timeout::simpleTimeout(10);
-		ser_.setTimeout(to);
-		ser_.open();
-		// Check STO signals
-		ser_.write("!STT\r");
-	}
-	catch (serial::IOException &e)
-	{
-		ROS_ERROR_STREAM("Unable to open port ");
-		ROS_INFO_STREAM("Unable to open port");
-	}
-	if (ser_.isOpen())
-	{
-		ROS_INFO_STREAM("Serial Port initialized\"");
-	}
-	else
-	{
-		ROS_INFO_STREAM("Serial Port is not open");
-	}
-	run();
-}
-
-void RoboteqDriver::run()
-{
-	initialize_services();
-
-	// Read I2T parameters
-	if (!read_i2t_parameters())
-	{
-		ROS_ERROR("Reading I2T parameters failed");
-	}	
-
-	nh_.getParam("frequency_list", f_list);
-
-	std::stringstream ss_gen;
-	ss_gen << "^echof 1_"; 	// Disable echo from driver
-	ss_gen << "# c_";	// Clear Buffer History of previous queries
-
-	for (int i = 0; i < f_list.size(); i++)
-	{
-		if (f_list[i] > 0)
-		{
-			ROS_INFO_STREAM(tag << "frequency " << i << " " << f_list[i]);
-			ss_gen << "/\"DF" << i << "?\",\"?\"";
-			std::map<std::string, std::string> query_map;
-			std::stringstream query_name;
-			query_name << "query" << i;
-			formQuery(query_name.str(), query_map, query_pub_, ss_gen);
-			ss_gen << "# " << 1000 / f_list[i] << "_";
-		}
-		else
-		{
-			ROS_ERROR_STREAM(tag << "Negative frequency detected " << f_list[i]);
-		}
-	}
-
-	ser_.write(ss_gen.str()); // Send commands and queries
-	ser_.flush();
-	ROS_INFO_STREAM(tag << ss_gen.str());
-	serial_read_pub_ = nh_.advertise<std_msgs::String>("read_serial", 1000);
-	i2t_pub_ = nh_.advertise<roboteq_motor_controller_driver::channel_values>("i2t", 1000);
-
-	double max_freq;
-	max_freq = *std::max_element(f_list.begin(), f_list.end());
-	ROS_INFO_STREAM(tag << " max frequency " << max_freq);
-
-	std::thread{std::bind(&RoboteqDriver::read_roboteq_output, this)}.detach();
-}
-
-void RoboteqDriver::initialize_services()
-{
-	configsrv = nh_priv_.advertiseService("config_service", &RoboteqDriver::configservice, this);
-	commandsrv = nh_priv_.advertiseService("command_service", &RoboteqDriver::commandservice, this);
-	maintenancesrv = nh_priv_.advertiseService("maintenance_service", &RoboteqDriver::maintenanceservice, this);
-	resetstosrv = nh_priv_.advertiseService("reset_sto",&RoboteqDriver::resetstoservice, this);
-	// initialize service of disable motors functionality
-	disbale_motor_srv = nh_.advertiseService("disable_channel", &RoboteqDriver::disable_motor, this);
-	// service to send commands
-	arbitrary_command_srv = nh_.advertiseService("arbitrary_command_service", &RoboteqDriver::arbitrary_command_service, this);
 }
 
 bool RoboteqDriver::configservice(roboteq_motor_controller_driver::config_srv::Request &request, roboteq_motor_controller_driver::config_srv::Response &response)
