@@ -52,6 +52,7 @@ public:
 private:	
 	bool connect();
 	void setup_queries();
+	void setup_subscribers();
 	bool read_i2t_parameters();
 	void read_roboteq_output();
 	void dual_vel_callback(const std_msgs::Int16 &msg);
@@ -211,100 +212,8 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 	// Setup queries
 	setup_queries();
 
-	// Subscribe to command topics
-	if (!nh_.param<std::string>("channel_mode", channel_mode, std::string("dual")))
-	{
-		ROS_INFO_STREAM("No channel mode was selected. Assigning driver as dual.");
-	}
-
-	if (channel_mode == "dual")
-	{
-		if (!nh_.param<std::string>("motor_type", motor_type, std::string("skid_steering")))
-		{
-			ROS_INFO_STREAM("No valid general motor type was selected. Assigning skid_steering.");
-			if (!nh_.param<std::string>("motor_1_type", motor_1_type, std::string("set_speed")))
-			{
-				ROS_INFO_STREAM("No valid type was found for motor 1. Assigning set_speed");
-			}
-			if (!nh_.param<std::string>("motor_2_type", motor_2_type, std::string("set_speed")))
-			{
-				ROS_INFO_STREAM("No valid type was found for motor 2. Assigning set_speed");
-			}
-		}
-		else
-		{
-			motor_1_type = motor_type;
-			motor_2_type = motor_type;
-		}
-	}
-	else
-	{
-		if (!nh_.param<std::string>("motor_1_type", motor_1_type, std::string("set_speed")))
-		{
-			ROS_INFO_STREAM("No valid type was found for motor 1. Assigning set_speed");
-		}
-		if (!nh_.param<std::string>("motor_2_type", motor_2_type, std::string("set_speed")))
-		{
-			ROS_INFO_STREAM("No valid type was found for motor 2. Assigning set_speed");
-		}
-	}
-
-	if (motor_type == "skid_steering")
-	{	
-		nh_.param<double>("max_vel_x", max_vel_x, 0.5);
-		nh_.param<double>("max_vel_ang", max_vel_ang, 0.5);
-		nh_.param<double>("track_width", track_width, 0.9925);
-		nh_.param<double>("reduction_ratio", reduction_ratio, 70.0);
-		nh_.param<double>("wheel_circumference", wheel_circumference, 1.13914122);		
-		ROS_INFO_STREAM("Driver controls two motors moving a skid steering vehicle.");
-		cmd_vel_sub = nh_.subscribe("cmd_vel", 10, &RoboteqDriver::skid_steering_vel_callback, this);
-	}
-	else if (channel_mode == "dual")
-	{
-		ROS_INFO_STREAM("Driver controls two motors with a single value.");
-		cmd_vel_channel_1_sub = nh_.subscribe("dual_cmd_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
-		cmd_vel_channel_2_sub = nh_.subscribe("dual_cmd_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
-		if ((motor_1_type == "set_speed") || (motor_type == "set_speed"))
-		{
-			ROS_INFO_STREAM("Motor 1 is operating in closed loop mode.");
-		}
-		else
-		{
-			ROS_INFO_STREAM("Motor 1 is operating in open loop mode.");
-		}
-		if ((motor_2_type == "set_speed") || (motor_type == "set_speed"))
-		{
-			ROS_INFO_STREAM("Motor 2 is operating in closed loop mode.");
-		}
-		else
-		{
-			ROS_INFO_STREAM("Motor 2 is operating in open loop mode.");
-		}
-	}
-	else if (channel_mode == "single")
-	{
-		ROS_INFO_STREAM("Driver controls two motors seperately.");
-		if (motor_1_type == "set_speed")
-		{
-			ROS_INFO_STREAM("Motor 1 is operating in closed loop mode.");
-			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_set_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
-		}
-		else
-		{
-			ROS_INFO_STREAM("Motor 1 is operating in open loop mode.");
-			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_go_to_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
-		}
-		if (motor_2_type == "set_speed")
-		{
-			ROS_INFO_STREAM("Motor 2 is operating in closed loop mode.");
-			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_set_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
-		}
-		else
-		{
-			ROS_INFO_STREAM("Motor 2 is operating in open loop mode.");
-			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_go_to_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
-		}
-	}
+	// Setup subscribers
+	setup_subscribers();	
 }
 
 bool RoboteqDriver::connect()
@@ -405,6 +314,104 @@ void RoboteqDriver::setup_queries()
 	ROS_INFO_STREAM(tag << " max frequency " << max_freq);
 
 	std::thread{std::bind(&RoboteqDriver::read_roboteq_output, this)}.detach();
+}
+
+void RoboteqDriver::setup_subscribers()
+{
+	// Subscribe to command topics
+	if (!nh_.param<std::string>("channel_mode", channel_mode, std::string("dual")))
+	{
+		ROS_INFO_STREAM("No channel mode was selected. Assigning driver as dual.");
+	}
+
+	if (channel_mode == "dual")
+	{
+		if (!nh_.param<std::string>("motor_type", motor_type, std::string("skid_steering")))
+		{
+			ROS_INFO_STREAM("No valid general motor type was selected. Assigning skid_steering.");
+			if (!nh_.param<std::string>("motor_1_type", motor_1_type, std::string("set_speed")))
+			{
+				ROS_INFO_STREAM("No valid type was found for motor 1. Assigning set_speed");
+			}
+			if (!nh_.param<std::string>("motor_2_type", motor_2_type, std::string("set_speed")))
+			{
+				ROS_INFO_STREAM("No valid type was found for motor 2. Assigning set_speed");
+			}
+		}
+		else
+		{
+			motor_1_type = motor_type;
+			motor_2_type = motor_type;
+		}
+	}
+	else
+	{
+		if (!nh_.param<std::string>("motor_1_type", motor_1_type, std::string("set_speed")))
+		{
+			ROS_INFO_STREAM("No valid type was found for motor 1. Assigning set_speed");
+		}
+		if (!nh_.param<std::string>("motor_2_type", motor_2_type, std::string("set_speed")))
+		{
+			ROS_INFO_STREAM("No valid type was found for motor 2. Assigning set_speed");
+		}
+	}
+
+	if (motor_type == "skid_steering")
+	{	
+		nh_.param<double>("max_vel_x", max_vel_x, 0.5);
+		nh_.param<double>("max_vel_ang", max_vel_ang, 0.5);
+		nh_.param<double>("track_width", track_width, 0.9925);
+		nh_.param<double>("reduction_ratio", reduction_ratio, 70.0);
+		nh_.param<double>("wheel_circumference", wheel_circumference, 1.13914122);		
+		ROS_INFO_STREAM("Driver controls two motors moving a skid steering vehicle.");
+		cmd_vel_sub = nh_.subscribe("cmd_vel", 10, &RoboteqDriver::skid_steering_vel_callback, this);
+	}
+	else if (channel_mode == "dual")
+	{
+		ROS_INFO_STREAM("Driver controls two motors with a single value.");
+		cmd_vel_channel_1_sub = nh_.subscribe("dual_cmd_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
+		cmd_vel_channel_2_sub = nh_.subscribe("dual_cmd_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
+		if ((motor_1_type == "set_speed") || (motor_type == "set_speed"))
+		{
+			ROS_INFO_STREAM("Motor 1 is operating in closed loop mode.");
+		}
+		else
+		{
+			ROS_INFO_STREAM("Motor 1 is operating in open loop mode.");
+		}
+		if ((motor_2_type == "set_speed") || (motor_type == "set_speed"))
+		{
+			ROS_INFO_STREAM("Motor 2 is operating in closed loop mode.");
+		}
+		else
+		{
+			ROS_INFO_STREAM("Motor 2 is operating in open loop mode.");
+		}
+	}
+	else if (channel_mode == "single")
+	{
+		ROS_INFO_STREAM("Driver controls two motors seperately.");
+		if (motor_1_type == "set_speed")
+		{
+			ROS_INFO_STREAM("Motor 1 is operating in closed loop mode.");
+			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_set_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
+		}
+		else
+		{
+			ROS_INFO_STREAM("Motor 1 is operating in open loop mode.");
+			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_go_to_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
+		}
+		if (motor_2_type == "set_speed")
+		{
+			ROS_INFO_STREAM("Motor 2 is operating in closed loop mode.");
+			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_set_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
+		}
+		else
+		{
+			ROS_INFO_STREAM("Motor 2 is operating in open loop mode.");
+			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_go_to_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
+		}
+	}
 }
 
 bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Request &req, roboteq_motor_controller_driver::SetInt::Response &res)
