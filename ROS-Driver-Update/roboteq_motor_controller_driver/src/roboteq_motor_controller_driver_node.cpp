@@ -854,13 +854,15 @@ void RoboteqDriver::formQuery(std::string param, std::map<std::string, std::stri
 }
 
 void RoboteqDriver::read_roboteq_output()
-{
+{	
+	bool had_error;
+	int try_count;
 	int frequency_index;
+	char delimiter{'\r'};
 	std::string message;
-	std::string data_copy;	
+	std::string delimiter_str{delimiter};
 	std_msgs::String result;
-	std_msgs::Header header;
-	std::string delimiter{"\r"};
+	std_msgs::Header header;	
 	size_t max_response_size = 65536;
 	std::vector<std::string> query_fields;
 	std::vector<std::string> sub_query_fields;
@@ -876,8 +878,17 @@ void RoboteqDriver::read_roboteq_output()
 
 	while (ros::ok() && ser_.isOpen())
 	{
-		message = ser_.readline(max_response_size, delimiter); // Read up to delimiter
-		if (message.size() == 0 || (message[0] != 'D' && message[1] != 'F'))
+		try_count = 0;
+		message.clear();
+		while ((message.empty() || message.back() != delimiter) && try_count < 5) {
+			message += ser_.readline(max_response_size, delimiter_str); // Read up to delimiter
+			if (!message.empty())
+			{
+				try_count++;
+			}			
+		}
+
+		if (message.empty() || message.back() != delimiter || (message[0] != 'D' && message[1] != 'F'))
 		{	
 			continue;
 		}
@@ -912,6 +923,7 @@ void RoboteqDriver::read_roboteq_output()
 
 				boost::split(sub_query_fields, query_fields[j], boost::algorithm::is_any_of(":"));
 				
+				had_error = false;
 				for (int k = 0; k < sub_query_fields.size(); k++)
 				{
 					try
@@ -922,9 +934,16 @@ void RoboteqDriver::read_roboteq_output()
 					{
 						ROS_ERROR_STREAM(tag << "Garbage data on Serial " << message << "//" << query_fields[j] << "//" << sub_query_fields[k]);
 						std::cerr << e.what() << '\n';
+						had_error = true;
 						break;
 					}
 				}
+
+				if (had_error) 
+				{
+					continue;
+				}
+
 				query_pub_[cum_query_size[frequency_index] + j - 1].publish(msg);
 
 				// Save motor amps values and runtime status flags for I2T check
