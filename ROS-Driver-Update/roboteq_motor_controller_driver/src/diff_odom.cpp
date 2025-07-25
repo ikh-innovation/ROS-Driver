@@ -402,6 +402,8 @@ void Odometry_calc::spin()
 void Odometry_calc::encoderBCR(const roboteq_motor_controller_driver::channel_values &ticks)
 
 {
+	if (ticks.value.size() != 2) return;
+	
 	right_count = ticks.value[0];
 	left_count = ticks.value[1];
 	now = ticks.header.stamp;
