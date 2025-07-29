@@ -210,6 +210,11 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 		ROS_ERROR_STREAM(tag << "Failed to set operating mode.");
 		exit(EXIT_FAILURE);
 	}
+	if (!setup("CLERD", operating_mode == "speed" ? 4 : 0))
+	{
+		ROS_ERROR_STREAM(tag << "Failed to set closed loope error detetection.");
+		exit(EXIT_FAILURE);
+	}
 
 	// Advertise services
 	resetstosrv = nh_priv_.advertiseService("reset_sto",&RoboteqDriver::resetstoservice, this);
