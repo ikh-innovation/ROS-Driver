@@ -96,6 +96,7 @@ private:
 	serial::Serial ser_;
 	
 	int rate;
+	int amp_lim;
 	int max_rpm;
 	int motor_acceleration_rate;
 	
@@ -154,6 +155,10 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 	}
 
 	// Read configuration parameters
+	if (!nh_.param<int>("amp_lim", amp_lim, 300))
+	{
+		nh_.setParam("amp_lim", amp_lim);
+	}
 	nh_.param<int>("max_rpm", max_rpm, 2600);
 	nh_.param<bool>("safe_speed", safe_speed, false);
 	nh_.param<int>("motor_acceleration_rate", motor_acceleration_rate, 2000);
@@ -185,6 +190,11 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 		ser_.read(ser_.available());
 	}
 
+	if (!setup("ALIM", amp_lim))
+	{
+		ROS_ERROR_STREAM(tag << "Failed to set Amp limit.");
+		exit(EXIT_FAILURE);
+	}
 	if (!setup("MXRPM", max_rpm))
 	{
 		ROS_ERROR_STREAM(tag << "Failed to set max RPM.");
