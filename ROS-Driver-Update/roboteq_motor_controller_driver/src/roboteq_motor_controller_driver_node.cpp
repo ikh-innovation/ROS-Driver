@@ -524,7 +524,7 @@ void RoboteqDriver::skid_steering_vel_callback(const geometry_msgs::Twist &msg)
 	if (safe_speed){
 		ROS_WARN_STREAM("Robot Speed in safe Mode!");
 		a = safe_speed_scale;
-		if ( a>1.0 && a<0.05){
+		if ( a>1.0 || a<0.0){
 			a = 0.6;
 		}
 	}
