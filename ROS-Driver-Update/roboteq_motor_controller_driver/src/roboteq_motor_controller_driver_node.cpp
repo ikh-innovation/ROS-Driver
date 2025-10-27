@@ -455,6 +455,16 @@ bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Reque
 		enabled_channel_.channel_1.store(true);
 		enabled_channel_.channel_2.store(true);
 	}
+	else if (req.data == -2)
+	{
+		ROS_WARN("Enabling motor 1");
+		enabled_channel_.channel_1.store(true);
+	}
+	else if (req.data == -3)
+	{
+		ROS_WARN("Enabling motor 2");
+		enabled_channel_.channel_2.store(true);
+	}
 	else
 	{
 		ROS_ERROR("Invalid channel number: %d", req.data);
