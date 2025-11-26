@@ -469,6 +469,7 @@ bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Reque
 	{
 		ROS_ERROR("Invalid channel number: %d", req.data);
 		res.success = false;
+		res.message = "Invalid channel number";
 		return true;
 	}
 	
@@ -478,6 +479,7 @@ bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Reque
 	enabled_motors_pub_.publish(msg);
 
 	res.success = true;
+	res.message = "Motor enable/disable command processed";
 	return true;
 }
 
