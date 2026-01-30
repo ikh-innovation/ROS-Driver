@@ -98,6 +98,7 @@ private:
 	int rate;
 	int amp_lim;
 	int max_rpm;
+	int max_power;
 	int motor_acceleration_rate;
 	
 	bool safe_speed;
@@ -214,6 +215,15 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 	{
 		ROS_ERROR_STREAM(tag << "Failed to set closed loope error detetection.");
 		exit(EXIT_FAILURE);
+	}
+	if (nh_.hasParam("max_power"))
+	{
+		nh_.getParam("max_power", max_power);
+		if (!setup("MXPW", max_power))
+		{
+			ROS_ERROR_STREAM(tag << "Failed to set max power.");
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	// Advertise services
