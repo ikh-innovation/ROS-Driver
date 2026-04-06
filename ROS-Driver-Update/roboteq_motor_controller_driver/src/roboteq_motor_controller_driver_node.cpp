@@ -98,6 +98,7 @@ private:
 	int rate;
 	int amp_lim;
 	int max_rpm;
+	int amp_trig;
 	int max_power;
 	int motor_acceleration_rate;
 	
@@ -196,6 +197,11 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 		ROS_ERROR_STREAM(tag << "Failed to set Amp limit.");
 		exit(EXIT_FAILURE);
 	}
+	if (!setup("ATRIG", amp_trig))
+	{
+		ROS_ERROR_STREAM(tag << "Failed to set Amp trigger level.");
+		exit(EXIT_FAILURE);
+	}
 	if (!setup("MXRPM", max_rpm))
 	{
 		ROS_ERROR_STREAM(tag << "Failed to set max RPM.");
@@ -222,6 +228,15 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 		if (!setup("MXPW", max_power))
 		{
 			ROS_ERROR_STREAM(tag << "Failed to set max power.");
+			exit(EXIT_FAILURE);
+		}
+	}
+	if (nh_.hasParam("amp_trig"))
+	{
+		nh_.getParam("amp_trig", amp_trig);
+		if (!setup("ATRIG", amp_trig))
+		{
+			ROS_ERROR_STREAM(tag << "Failed to set Amp trigger level.");
 			exit(EXIT_FAILURE);
 		}
 	}
