@@ -197,11 +197,6 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 		ROS_ERROR_STREAM(tag << "Failed to set Amp limit.");
 		exit(EXIT_FAILURE);
 	}
-	if (!setup("ATRIG", amp_trig))
-	{
-		ROS_ERROR_STREAM(tag << "Failed to set Amp trigger level.");
-		exit(EXIT_FAILURE);
-	}
 	if (!setup("MXRPM", max_rpm))
 	{
 		ROS_ERROR_STREAM(tag << "Failed to set max RPM.");
