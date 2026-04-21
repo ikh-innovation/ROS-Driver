@@ -97,12 +97,30 @@ bool FileHelper::updateFile(bool mower_1_enabled, bool mower_2_enabled)
 
 	std::string currentTime = getCurrentTime();
 
+	if (lines.empty()) 
+    {
+        // If file is empty, just add the timestamp
+        lines.push_back(currentTime);
+    } else 
+    {
+        if (lines[0].size() > 0 && lines[0][0] == '#') 
+        {
+            // If first line starts with #, replace it (the 's' command)
+            lines[0] = currentTime;
+        } 
+        else 
+        {
+            // Otherwise, insert at the top (the '1i' command)
+            lines.insert(lines.begin(), currentTime);
+        }
+    }
+
 	// Update or add export first line
-    std::string exportLine = "export MOWER_MOTOR_1_ENABLED=" + mower_1_enabled?"True":"False";
+    std::string exportLine = "export MOWER_MOTOR_1_ENABLED=" + std::string(mower_1_enabled?"True":"False");
     bool found = false;
 
     for (auto& l : lines) {
-        if (l.rfind("export MOWER_MOTOR_1_ENABLED=", 0) == 0) {
+        if (l.rfind("export MOWER_MOTOR_1_ENABLED=")!=std::string::npos) {
             l = exportLine;
             found = true;
             break;
@@ -114,11 +132,11 @@ bool FileHelper::updateFile(bool mower_1_enabled, bool mower_2_enabled)
     }
 
 	// Update or add export second line
-    exportLine = "export MOWER_MOTOR_2_ENABLED=" + mower_2_enabled?"True":"False";
+    exportLine = "export MOWER_MOTOR_2_ENABLED=" + std::string(mower_2_enabled?"True":"False");
     found = false;
 
     for (auto& l : lines) {
-        if (l.rfind("export MOWER_MOTOR_1_ENABLED=", 0) == 0) {
+        if (l.rfind("export MOWER_MOTOR_2_ENABLED=")!=std::string::npos) {
             l = exportLine;
             found = true;
             break;
