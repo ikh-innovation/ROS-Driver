@@ -116,7 +116,7 @@ bool FileHelper::updateFile(bool mower_1_enabled, bool mower_2_enabled)
     }
 
 	// Update or add export first line
-    std::string exportLine = "export MOWER_MOTOR_1_ENABLED=" + std::string(mower_1_enabled?"True":"False");
+    std::string exportLine = "export MOWER_MOTOR_1_ENABLED=" + std::string(mower_1_enabled?"true":"false");
     bool found = false;
 
     for (auto& l : lines) {
@@ -132,7 +132,7 @@ bool FileHelper::updateFile(bool mower_1_enabled, bool mower_2_enabled)
     }
 
 	// Update or add export second line
-    exportLine = "export MOWER_MOTOR_2_ENABLED=" + std::string(mower_2_enabled?"True":"False");
+    exportLine = "export MOWER_MOTOR_2_ENABLED=" + std::string(mower_2_enabled?"true":"false");
     found = false;
 
     for (auto& l : lines) {
