@@ -1,11 +1,14 @@
 #include <mutex>
+#include <ctime>
 #include <atomic>
 #include <math.h>
 #include <thread>
 #include <sstream>
 #include <cassert>
+#include <fstream>
 #include <iostream>
 #include <typeinfo>
+#include <algorithm>
 
 #include <tf/tf.h>
 #include <ros/ros.h>
@@ -32,6 +35,131 @@ template <typename T> float sgn(T val) {
     return (T(0) < val) - (val < T(0));
 }
 
+class FileHelper
+{
+public:
+	FileHelper(const std::string& file_path);
+	bool updateFile(bool mower_1_enabled, bool mower_2_enabled);
+
+private:
+	std::string getCurrentTime();
+	bool fileExists(const std::string& path);
+	std::string expandHome(const std::string &path);
+
+	const std::string file_path_;
+};
+
+FileHelper::FileHelper(const std::string& file_path): file_path_{expandHome(file_path)}{};
+
+std::string FileHelper::getCurrentTime() 
+{
+    time_t now = time(nullptr);
+    char buf[64];
+    strftime(buf, sizeof(buf), "#%d/%m/%Y %H:%M:%S", localtime(&now));
+    return std::string(buf);
+}
+
+bool FileHelper::fileExists(const std::string& path) 
+{
+    std::ifstream f(path);
+    return f.good();
+}
+
+std::string FileHelper::expandHome(const std::string &path)
+{
+	if (!path.empty() && path[0] == '~')
+	{
+		const char *home = std::getenv("HOME");
+		if (home)
+			return std::string(home) + path.substr(1);
+	}
+	return path;
+}
+
+bool FileHelper::updateFile(bool mower_1_enabled, bool mower_2_enabled)
+{
+	if(!fileExists(file_path_))
+	{
+		ROS_WARN_STREAM("File path " << file_path_ << " does not exist");
+		return false;
+	}
+
+	// Read file
+	std::ifstream inFile(file_path_);
+	std::vector<std::string> lines;
+	std::string line;
+
+	while (getline(inFile, line)) 
+	{
+        lines.push_back(line);
+    }
+    inFile.close();
+
+	std::string currentTime = getCurrentTime();
+
+	if (lines.empty()) 
+    {
+        // If file is empty, just add the timestamp
+        lines.push_back(currentTime);
+    } else 
+    {
+        if (lines[0].size() > 0 && lines[0][0] == '#') 
+        {
+            // If first line starts with #, replace it (the 's' command)
+            lines[0] = currentTime;
+        } 
+        else 
+        {
+            // Otherwise, insert at the top (the '1i' command)
+            lines.insert(lines.begin(), currentTime);
+        }
+    }
+
+	// Update or add export first line
+    std::string exportLine = "export MOWER_MOTOR_1_ENABLED=" + std::string(mower_1_enabled?"true":"false");
+    bool found = false;
+
+    for (auto& l : lines) {
+        if (l.rfind("export MOWER_MOTOR_1_ENABLED=")!=std::string::npos) {
+            l = exportLine;
+            found = true;
+            break;
+        }
+    }
+
+	if (!found) {
+        lines.push_back(exportLine);
+    }
+
+	// Update or add export second line
+    exportLine = "export MOWER_MOTOR_2_ENABLED=" + std::string(mower_2_enabled?"true":"false");
+    found = false;
+
+    for (auto& l : lines) {
+        if (l.rfind("export MOWER_MOTOR_2_ENABLED=")!=std::string::npos) {
+            l = exportLine;
+            found = true;
+            break;
+        }
+    }
+
+	if (!found) {
+        lines.push_back(exportLine);
+    }
+
+	// Remove empty lines
+    lines.erase(remove_if(lines.begin(), lines.end(), [](const std::string& s) { return s.empty(); }), lines.end());
+
+	// Write back to file
+    std::ofstream outFile(file_path_, std::ios::trunc);
+    for (const auto& l : lines) {
+        outFile << l << "\n";
+    }
+    outFile.close();
+
+	return true;
+}
+
 static const std::string tag{"[RoboteQ] "};
 
 class RoboteqDriver
@@ -46,8 +174,6 @@ public:
 			ser_.close();
 		}
 	}
-
-	void run();
 
 private:	
 	bool connect();
@@ -98,6 +224,7 @@ private:
 	int rate;
 	int amp_lim;
 	int max_rpm;
+	int amp_trig;
 	int max_power;
 	int motor_acceleration_rate;
 	
@@ -132,6 +259,8 @@ private:
 		std::atomic<bool> channel_2{true};
 	};
 	EnabledChannels enabled_channel_;
+
+	FileHelper file_helper_{"~/.ikhrc"};
 };
 
 RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(nh), nh_priv_(nh_priv)
@@ -222,6 +351,15 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 		if (!setup("MXPW", max_power))
 		{
 			ROS_ERROR_STREAM(tag << "Failed to set max power.");
+			exit(EXIT_FAILURE);
+		}
+	}
+	if (nh_.hasParam("amp_trig"))
+	{
+		nh_.getParam("amp_trig", amp_trig);
+		if (!setup("ATRIG", amp_trig))
+		{
+			ROS_ERROR_STREAM(tag << "Failed to set Amp trigger level.");
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -487,6 +625,8 @@ bool RoboteqDriver::disable_motor(roboteq_motor_controller_driver::SetInt::Reque
 	msg.data.push_back(enabled_channel_.channel_1.load());
 	msg.data.push_back(enabled_channel_.channel_2.load());
 	enabled_motors_pub_.publish(msg);
+
+	file_helper_.updateFile(enabled_channel_.channel_1.load(), enabled_channel_.channel_2.load());
 
 	res.success = true;
 	res.message = "Motor enable/disable command processed";
