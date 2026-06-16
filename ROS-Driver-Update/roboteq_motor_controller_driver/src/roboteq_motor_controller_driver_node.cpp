@@ -227,6 +227,7 @@ private:
 	int amp_trig;
 	int max_power;
 	int motor_acceleration_rate;
+	int motor_deceleration_rate;
 	
 	bool safe_speed;
 	
@@ -360,6 +361,15 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 		if (!setup("ATRIG", amp_trig))
 		{
 			ROS_ERROR_STREAM(tag << "Failed to set Amp trigger level.");
+			exit(EXIT_FAILURE);
+		}
+	}
+	if (nh_.hasParam("motor_deceleration_rate"))
+	{
+		nh_.getParam("motor_deceleration_rate", motor_deceleration_rate);
+		if (!setup("MDEC", motor_deceleration_rate))
+		{
+			ROS_ERROR_STREAM(tag << "Failed to set motor deceleration rate.");
 			exit(EXIT_FAILURE);
 		}
 	}
