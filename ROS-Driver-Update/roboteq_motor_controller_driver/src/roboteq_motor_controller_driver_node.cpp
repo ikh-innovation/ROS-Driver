@@ -527,13 +527,13 @@ void RoboteqDriver::setup_subscribers()
 		nh_.param<double>("reduction_ratio", reduction_ratio, 70.0);
 		nh_.param<double>("wheel_circumference", wheel_circumference, 1.13914122);		
 		ROS_INFO_STREAM("Driver controls two motors moving a skid steering vehicle.");
-		cmd_vel_sub = nh_.subscribe("cmd_vel", 10, &RoboteqDriver::skid_steering_vel_callback, this);
+		cmd_vel_sub = nh_.subscribe("cmd_vel", 1, &RoboteqDriver::skid_steering_vel_callback, this);
 	}
 	else if (channel_mode == "dual")
 	{
 		ROS_INFO_STREAM("Driver controls two motors with a single value.");
-		cmd_vel_channel_1_sub = nh_.subscribe("dual_cmd_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
-		cmd_vel_channel_2_sub = nh_.subscribe("dual_cmd_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
+		cmd_vel_channel_1_sub = nh_.subscribe("dual_cmd_vel", 1, &RoboteqDriver::channel_1_vel_callback, this);
+		cmd_vel_channel_2_sub = nh_.subscribe("dual_cmd_vel", 1, &RoboteqDriver::channel_2_vel_callback, this);
 		if ((motor_1_type == "set_speed") || (motor_type == "set_speed"))
 		{
 			ROS_INFO_STREAM("Motor 1 is operating in closed loop mode.");
@@ -557,22 +557,22 @@ void RoboteqDriver::setup_subscribers()
 		if (motor_1_type == "set_speed")
 		{
 			ROS_INFO_STREAM("Motor 1 is operating in closed loop mode.");
-			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_set_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
+			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_set_vel", 1, &RoboteqDriver::channel_1_vel_callback, this);
 		}
 		else
 		{
 			ROS_INFO_STREAM("Motor 1 is operating in open loop mode.");
-			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_go_to_vel", 10, &RoboteqDriver::channel_1_vel_callback, this);
+			cmd_vel_channel_1_sub = nh_.subscribe("chan_1_go_to_vel", 1, &RoboteqDriver::channel_1_vel_callback, this);
 		}
 		if (motor_2_type == "set_speed")
 		{
 			ROS_INFO_STREAM("Motor 2 is operating in closed loop mode.");
-			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_set_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
+			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_set_vel", 1, &RoboteqDriver::channel_2_vel_callback, this);
 		}
 		else
 		{
 			ROS_INFO_STREAM("Motor 2 is operating in open loop mode.");
-			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_go_to_vel", 10, &RoboteqDriver::channel_2_vel_callback, this);
+			cmd_vel_channel_2_sub = nh_.subscribe("chan_2_go_to_vel", 1, &RoboteqDriver::channel_2_vel_callback, this);
 		}
 	}
 }
