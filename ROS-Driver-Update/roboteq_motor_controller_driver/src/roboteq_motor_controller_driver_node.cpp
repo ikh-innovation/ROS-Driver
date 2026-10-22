@@ -672,13 +672,13 @@ void RoboteqDriver::skid_steering_vel_callback(const geometry_msgs::Twist &msg)
 
 	double a = 1.0;
 
-	if (!nh_.getParam("safe_speed", safe_speed))
+	if (!nh_.getParamCached("safe_speed", safe_speed))
 	{
 
 		safe_speed = false;
 	}
 
-	if (!nh_.getParam("safe_speed_scale", safe_speed_scale))
+	if (!nh_.getParamCached("safe_speed_scale", safe_speed_scale))
 	{
 		safe_speed_scale = 0.6;
 	}
