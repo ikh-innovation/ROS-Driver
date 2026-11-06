@@ -9,6 +9,7 @@
 #include <iostream>
 #include <typeinfo>
 #include <algorithm>
+#include <condition_variable>
 
 #include <tf/tf.h>
 #include <ros/ros.h>
@@ -22,10 +23,12 @@
 #include <std_msgs/UInt8MultiArray.h>
 
 #include <boost/lexical_cast.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 
 #include <roboteq_motor_controller_driver/SetInt.h>
+#include <roboteq_motor_controller_driver/SetBumper.h>
 #include <roboteq_motor_controller_driver/config_srv.h>
 #include <roboteq_motor_controller_driver/command_srv.h>
 #include <roboteq_motor_controller_driver/channel_values.h>
@@ -162,6 +165,57 @@ bool FileHelper::updateFile(bool mower_1_enabled, bool mower_2_enabled)
 
 static const std::string tag{"[RoboteQ] "};
 
+// DINA (digital input action) value = action + motor mask (motor 1 = 16, motor 2 = 32)
+static constexpr int DINA_NO_ACTION = 0;
+static constexpr int DINA_FWD_LIMIT = 4;
+static constexpr int DINA_REV_LIMIT = 5;
+static constexpr int DINA_BOTH_MOTORS = 16 + 32;
+// DINL (digital input active level)
+static constexpr int DINL_ACTIVE_HIGH = 0;
+static constexpr int DINL_ACTIVE_LOW = 1;
+
+// Parse a per-input configuration read-back such as "DINA=52" (reply to "~DINA 3") and return its value.
+// If the firmware returns all inputs instead ("DINA=0:0:52:53:..."), the value at the 1-based 'index' is used.
+static bool parse_indexed_config(const std::string& response, const std::string& cmd, int index, int& value)
+{
+	const std::string key = cmd + "=";
+	size_t start = response.find(key);
+	if (start == std::string::npos)
+	{
+		return false;
+	}
+	start += key.size();
+	const size_t end = response.find('\r', start);
+	const std::string values = response.substr(start, end == std::string::npos ? std::string::npos : end - start);
+
+	std::vector<std::string> fields;
+	boost::split(fields, values, boost::algorithm::is_any_of(":"));
+	std::string field;
+	if (fields.size() == 1)
+	{
+		field = fields[0];
+	}
+	else if (index >= 1 && index <= static_cast<int>(fields.size()))
+	{
+		field = fields[index - 1];
+	}
+	else
+	{
+		return false;
+	}
+	boost::algorithm::trim(field);
+
+	try
+	{
+		value = boost::lexical_cast<int>(field);
+	}
+	catch (const boost::bad_lexical_cast&)
+	{
+		return false;
+	}
+	return true;
+}
+
 class RoboteqDriver
 {
 public:
@@ -175,10 +229,28 @@ public:
 		}
 	}
 
-private:	
+private:
+	struct Bumper
+	{
+		std::string name;
+		int input{-1};                     // RoboteQ digital input number (1-based), -1 = not configured
+		int active_level{DINL_ACTIVE_HIGH};
+		int action{DINA_NO_ACTION};        // DINA value applied while the bumper is enabled
+		bool enabled{false};               // only accessed from the spinner thread
+		ros::Publisher state_pub;
+		bool configured() const { return input > 0; }
+	};
+
 	bool connect();
 	void setup_queries();
 	void setup_subscribers();
+	bool setup_bumpers();
+	bool read_bumper_params(const std::string& name, int action, Bumper& bumper);
+	bool setup_input(const std::string& cmd, int input, int value);
+	void publish_bumper_state(const Bumper& bumper);
+	bool route_config_reply(const std::string& line);
+	bool query_config(const std::string& cmd, int index, std::string& reply, double timeout_s = 0.5);
+	bool set_bumper_service(roboteq_motor_controller_driver::SetBumper::Request &req, roboteq_motor_controller_driver::SetBumper::Response &res);
 	bool read_i2t_parameters();
 	void read_roboteq_output();
 	void dual_vel_callback(const std_msgs::Int16 &msg);
@@ -204,6 +276,7 @@ private:
 	ros::ServiceServer maintenancesrv;
 	ros::ServiceServer disbale_motor_srv;
 	ros::ServiceServer arbitrary_command_srv;
+	ros::ServiceServer bumper_srv_;
 
 	ros::Subscriber cmd_vel_sub;
 	ros::Subscriber cmd_vel_channel_1_sub;
@@ -260,6 +333,18 @@ private:
 		std::atomic<bool> channel_2{true};
 	};
 	EnabledChannels enabled_channel_;
+
+	// Bumpers acting as RoboteQ limit switches (front: forward, rear: reverse)
+	Bumper front_bumper_;
+	Bumper rear_bumper_;
+
+	// Configuration read-backs requested while read_roboteq_output() owns the serial input:
+	// query_config() arms a reply prefix, the read loop hands over the matching line.
+	std::mutex config_reply_mtx_;
+	std::condition_variable config_reply_cv_;
+	std::string config_reply_prefix_;   // empty = nobody waiting
+	std::string config_reply_;
+	bool config_reply_ready_{false};
 
 	FileHelper file_helper_{"~/.ikhrc"};
 };
@@ -373,6 +458,11 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 			exit(EXIT_FAILURE);
 		}
 	}
+	if (!setup_bumpers())
+	{
+		ROS_ERROR_STREAM(tag << "Failed to set up bumpers.");
+		exit(EXIT_FAILURE);
+	}
 
 	// Advertise services
 	resetstosrv = nh_priv_.advertiseService("reset_sto",&RoboteqDriver::resetstoservice, this);
@@ -381,6 +471,10 @@ RoboteqDriver::RoboteqDriver(ros::NodeHandle nh, ros::NodeHandle nh_priv) : nh_(
 	disbale_motor_srv = nh_.advertiseService("disable_channel", &RoboteqDriver::disable_motor, this);
 	maintenancesrv = nh_priv_.advertiseService("maintenance_service", &RoboteqDriver::maintenanceservice, this);
 	arbitrary_command_srv = nh_.advertiseService("arbitrary_command_service", &RoboteqDriver::arbitrary_command_service, this);
+	if (front_bumper_.configured() || rear_bumper_.configured())
+	{
+		bumper_srv_ = nh_.advertiseService("set_bumper_enabled", &RoboteqDriver::set_bumper_service, this);
+	}
 
 	// Setup queries
 	setup_queries();
@@ -444,6 +538,253 @@ bool RoboteqDriver::setup(const std::string& cmd, const T& value)
 		ROS_ERROR_STREAM(tag << "Setup command failed: " << e.what());
 		return false;
 	}
+}
+
+// Set a per-input configuration ("^cmd input value") and verify it with "~cmd input".
+// Reads the serial port directly, so it must only be used before read_roboteq_output() is started.
+bool RoboteqDriver::setup_input(const std::string& cmd, int input, int value)
+{
+	std::stringstream ss_set;
+	ss_set << "^" << cmd << " " << input << " " << value << "\r";
+	std::stringstream ss_get;
+	ss_get << "~" << cmd << " " << input << "\r";
+	try {
+		ser_.write(ss_set.str());
+		ser_.flush();
+		ros::Duration(0.1).sleep();
+		ser_.write(ss_get.str());
+		ros::Duration(0.1).sleep();
+		std::string response = ser_.read(ser_.available());
+		int actual;
+		if (!parse_indexed_config(response, cmd, input, actual) || actual != value) {
+			ROS_ERROR_STREAM(tag << "Setup command failed: " << cmd << " " << input << " with value " << value << ". Response: " << response);
+			return false;
+		}
+		return true;
+	} catch (const std::exception& e) {
+		ROS_ERROR_STREAM(tag << "Setup command failed: " << e.what());
+		return false;
+	}
+}
+
+bool RoboteqDriver::read_bumper_params(const std::string& name, int action, Bumper& bumper)
+{
+	bumper.name = name;
+	bumper.action = action;
+
+	const std::string ns = "bumpers/" + name + "/";
+	if (!nh_.hasParam(ns + "input"))
+	{
+		ROS_INFO_STREAM(tag << "Bumper '" << name << "' not configured.");
+		return true;
+	}
+
+	int input;
+	if (!nh_.getParam(ns + "input", input) || input < 1)
+	{
+		ROS_ERROR_STREAM(tag << "Parameter '" << ns << "input' must be a digital input number >= 1.");
+		return false;
+	}
+
+	std::string level;
+	if (!nh_.getParam(ns + "active_level", level) || (level != "high" && level != "low"))
+	{
+		ROS_ERROR_STREAM(tag << "Parameter '" << ns << "active_level' must be 'high' or 'low'.");
+		return false;
+	}
+
+	bumper.input = input;
+	bumper.active_level = (level == "low") ? DINL_ACTIVE_LOW : DINL_ACTIVE_HIGH;
+	return true;
+}
+
+// Configure the bumper digital inputs as limit switches for both channels (front: forward, rear: reverse).
+// Settings are applied to RAM only and re-applied on every start.
+bool RoboteqDriver::setup_bumpers()
+{
+	if (!read_bumper_params("front", DINA_FWD_LIMIT + DINA_BOTH_MOTORS, front_bumper_) ||
+		!read_bumper_params("rear", DINA_REV_LIMIT + DINA_BOTH_MOTORS, rear_bumper_))
+	{
+		return false;
+	}
+
+	if (front_bumper_.configured() && rear_bumper_.configured() && front_bumper_.input == rear_bumper_.input)
+	{
+		ROS_ERROR_STREAM(tag << "Front and rear bumpers cannot use the same digital input (" << front_bumper_.input << ").");
+		return false;
+	}
+
+	for (Bumper* bumper : {&front_bumper_, &rear_bumper_})
+	{
+		if (!bumper->configured())
+		{
+			continue;
+		}
+
+		// Set the active level before arming the action
+		if (!setup_input("DINL", bumper->input, bumper->active_level) ||
+			!setup_input("DINA", bumper->input, bumper->action))
+		{
+			ROS_ERROR_STREAM(tag << "Failed to configure " << bumper->name << " bumper on DIN" << bumper->input << ".");
+			return false;
+		}
+
+		bumper->enabled = true;
+		bumper->state_pub = nh_.advertise<std_msgs::Bool>(bumper->name + "_bumper_enabled", 1, true);
+		publish_bumper_state(*bumper);
+
+		ROS_INFO_STREAM(tag << "Bumper '" << bumper->name << "' on DIN" << bumper->input
+			<< " (active " << (bumper->active_level == DINL_ACTIVE_LOW ? "low" : "high") << ") set as "
+			<< (bumper->action == DINA_FWD_LIMIT + DINA_BOTH_MOTORS ? "forward" : "reverse")
+			<< " limit switch for both channels (DINA=" << bumper->action << ").");
+	}
+	return true;
+}
+
+void RoboteqDriver::publish_bumper_state(const Bumper& bumper)
+{
+	std_msgs::Bool msg;
+	msg.data = bumper.enabled;
+	bumper.state_pub.publish(msg);
+}
+
+// Called by read_roboteq_output() for every complete line. Returns true if the line was the
+// configuration read-back a query_config() call is waiting for.
+bool RoboteqDriver::route_config_reply(const std::string& line)
+{
+	std::lock_guard<std::mutex> lock(config_reply_mtx_);
+	if (config_reply_prefix_.empty() || line.compare(0, config_reply_prefix_.size(), config_reply_prefix_) != 0)
+	{
+		return false;
+	}
+	config_reply_ = line;
+	if (!config_reply_.empty() && config_reply_.back() == '\r')
+	{
+		config_reply_.pop_back();
+	}
+	config_reply_ready_ = true;
+	config_reply_prefix_.clear();
+	config_reply_cv_.notify_one();
+	return true;
+}
+
+// Request "~cmd index" and wait for read_roboteq_output() to hand over the reply ("cmd=...").
+// Used while the read loop is running, so the serial input is never read from two threads.
+bool RoboteqDriver::query_config(const std::string& cmd, int index, std::string& reply, double timeout_s)
+{
+	std::unique_lock<std::mutex> lock(config_reply_mtx_);
+	// Arm before sending so the reply cannot be missed
+	config_reply_prefix_ = cmd + "=";
+	config_reply_ready_ = false;
+	config_reply_.clear();
+	lock.unlock();
+
+	std::stringstream ss;
+	ss << "~" << cmd << " " << index << "\r";
+	ser_.write(ss.str());
+	ser_.flush();
+
+	lock.lock();
+	const bool received = config_reply_cv_.wait_for(lock, std::chrono::duration<double>(timeout_s), [this] { return config_reply_ready_; });
+	config_reply_prefix_.clear(); // disarm on timeout
+	if (received)
+	{
+		reply = config_reply_;
+	}
+	return received;
+}
+
+// Enable/disable bumpers at runtime (manual override) by switching DINA between the limit switch action and "No action".
+bool RoboteqDriver::set_bumper_service(roboteq_motor_controller_driver::SetBumper::Request &req, roboteq_motor_controller_driver::SetBumper::Response &res)
+{
+	typedef roboteq_motor_controller_driver::SetBumper::Request Req;
+
+	std::vector<Bumper*> targets;
+	if (req.bumper == Req::FRONT || req.bumper == Req::REAR)
+	{
+		Bumper& bumper = (req.bumper == Req::FRONT) ? front_bumper_ : rear_bumper_;
+		if (!bumper.configured())
+		{
+			res.success = false;
+			res.message = "Bumper '" + req.bumper + "' is not configured";
+			return true;
+		}
+		targets.push_back(&bumper);
+	}
+	else if (req.bumper == Req::BOTH)
+	{
+		for (Bumper* bumper : {&front_bumper_, &rear_bumper_})
+		{
+			if (bumper->configured())
+			{
+				targets.push_back(bumper);
+			}
+		}
+	}
+	else
+	{
+		res.success = false;
+		res.message = "Unknown bumper '" + req.bumper + "', expected 'front', 'rear' or 'both'";
+		return true;
+	}
+
+	bool all_ok = true;
+	std::stringstream result;
+	try
+	{
+		for (Bumper* bumper : targets)
+		{
+			std::stringstream cmd;
+			cmd << "^DINA " << bumper->input << " " << (req.enable ? bumper->action : DINA_NO_ACTION) << "\r";
+			ser_.write(cmd.str());
+		}
+		ser_.flush();
+
+		// Verify each change through the read loop
+		for (Bumper* bumper : targets)
+		{
+			const int expected = req.enable ? bumper->action : DINA_NO_ACTION;
+			std::string reply;
+			int actual;
+			if (!query_config("DINA", bumper->input, reply))
+			{
+				all_ok = false;
+				result << bumper->name << ": no DINA read-back from controller; ";
+				continue;
+			}
+			if (!parse_indexed_config(reply, "DINA", bumper->input, actual) || actual != expected)
+			{
+				all_ok = false;
+				result << bumper->name << ": DIN" << bumper->input << " expected DINA=" << expected << ", got '" << reply << "'; ";
+				continue;
+			}
+
+			bumper->enabled = req.enable;
+			publish_bumper_state(*bumper);
+			result << bumper->name << " bumper " << (req.enable ? "enabled" : "disabled") << "; ";
+			if (req.enable)
+			{
+				ROS_INFO_STREAM(tag << "Bumper '" << bumper->name << "' limit switch enabled.");
+			}
+			else
+			{
+				ROS_WARN_STREAM(tag << "Bumper '" << bumper->name << "' limit switch DISABLED (manual override).");
+			}
+		}
+	}
+	catch (const std::exception& e)
+	{
+		all_ok = false;
+		result << "serial error: " << e.what();
+	}
+
+	res.success = all_ok;
+	res.message = result.str();
+	if (!all_ok)
+	{
+		ROS_ERROR_STREAM(tag << "set_bumper_enabled failed: " << res.message);
+	}
+	return true;
 }
 
 void RoboteqDriver::setup_queries()
@@ -1075,8 +1416,20 @@ void RoboteqDriver::read_roboteq_output()
 			}			
 		}
 
-		if (message.empty() || message.back() != delimiter || (message[0] != 'D' && message[1] != 'F'))
-		{	
+		if (message.empty() || message.back() != delimiter)
+		{
+			continue;
+		}
+
+		// Hand configuration read-backs (e.g. "DINA=52") to a waiting query_config() call
+		if (route_config_reply(message))
+		{
+			continue;
+		}
+
+		// Only query streams ("DF<n>?...") are decoded below
+		if (message.size() < 3 || message[0] != 'D' || message[1] != 'F')
+		{
 			continue;
 		}
 		

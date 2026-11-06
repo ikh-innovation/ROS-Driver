@@ -25,6 +25,18 @@ odom_topic: odom
 tf_header_frame: $(arg prefix)odom
 tf_child_frame: $(arg prefix)base_footprint
 
+# Bumpers wired to RoboteQ digital inputs, applied at startup as limit switches on both channels
+# (^DINA / ^DINL, RAM only). front -> Forward limit switch, rear -> Reverse limit switch.
+# Omit a bumper to leave it unconfigured. Toggle at runtime (manual override) with:
+#   rosservice call <ns>/set_bumper_enabled "{bumper: 'front', enable: false}"   # front | rear | both
+# bumpers:
+#   front:
+#     input: 3            # digital input number (DIN1..DINn, 1-based as in Roborun)
+#     active_level: low   # "high" or "low"
+#   rear:
+#     input: 4
+#     active_level: low
+
 
 
 #frequencyH : 50   #higher frequency (value is in ms)

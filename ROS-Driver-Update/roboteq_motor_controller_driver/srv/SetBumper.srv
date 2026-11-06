@@ -1,0 +1,9 @@
+string FRONT=front
+string REAR=rear
+string BOTH=both
+
+string bumper   # "front", "rear" or "both"
+bool enable     # true: bumper acts as limit switch, false: DINA set to "No action" (manual override)
+---
+bool success
+string message

@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   serial
   std_msgs
+  std_srvs
   rospy
   tf
   message_generation
@@ -59,6 +60,7 @@ find_package(catkin REQUIRED COMPONENTS
 add_service_files(
    FILES
    SetInt.srv
+   SetBumper.srv
    config_srv.srv
    command_srv.srv
    maintenance_srv.srv
