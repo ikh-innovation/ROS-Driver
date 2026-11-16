@@ -1,6 +1,6 @@
 #port : "/dev/SBL2360T"
 # port : "/dev/ttyS1"
-port: "/dev/ttyACM0"
+port: "/dev/roboteq_track"
 baud: 115200
 
 # specify robot track width in meters

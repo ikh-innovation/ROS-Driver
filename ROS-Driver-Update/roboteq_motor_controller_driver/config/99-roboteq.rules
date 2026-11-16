@@ -1,0 +1,9 @@
+# Stable names for the two RoboteQ  controllers.
+# Install:  sudo cp 99-roboteq.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules && sudo udevadm trigger
+# ID_SERIAL is the same string shown in /dev/serial/by-id/usb-<ID_SERIAL>-if00
+
+# Track (drive) controller -> /dev/roboteq_track
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="RoboteQ_RoboteQ_SBLMG2360T_SgA2AAlQS1MyOTgg_206E397C534B", SYMLINK+="roboteq_track", MODE="0666"
+
+# Brush controller -> /dev/roboteq_brush
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="RoboteQ_RoboteQ_SBLMG2360T_MQAjAAlQS1MyOTgg_205B3963534B", SYMLINK+="roboteq_brush", MODE="0666"

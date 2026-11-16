@@ -1,6 +1,6 @@
 # port : "/dev/ttyS0"
 # port : "/dev/SDC2160"
-port: "/dev/ttyACM1"
+port: "/dev/roboteq_brush"
 baud: 115200
 
 # specify robot track width in meters
