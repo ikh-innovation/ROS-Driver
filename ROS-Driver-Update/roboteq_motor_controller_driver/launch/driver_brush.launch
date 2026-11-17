@@ -4,7 +4,7 @@
     
         <rosparam command="load" file="$(find roboteq_motor_controller_driver)/config/query_brush.yaml" />
 
-        <node name = "roboteq_motor_controller_driver_brush" pkg = "roboteq_motor_controller_driver" type = "roboteq_motor_controller_driver_node_brush" output = "screen">
+        <node name = "roboteq_motor_controller_driver_brush" pkg = "roboteq_motor_controller_driver" type = "roboteq_motor_controller_driver_node_brush" output = "screen" respawn="true" respawn_delay="3">
         </node>
     </group>
 </launch>

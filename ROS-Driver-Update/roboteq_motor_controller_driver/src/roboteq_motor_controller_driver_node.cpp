@@ -99,12 +99,9 @@ private:
 			ser.setTimeout(to);
 			ser.open();
 		}
-		catch (serial::IOException &e)
+		catch (std::exception &e)
 		{
-
-			ROS_ERROR_STREAM("Unable to open port ");
-			ROS_INFO_STREAM("Unable to open port");
-			;
+			ROS_ERROR_STREAM("Unable to open port " << port << ": " << e.what());
 		}
 		if (ser.isOpen())
 		{
@@ -113,8 +110,9 @@ private:
 		}
 		else
 		{
-			// ROS_INFO_STREAM("HI4");
-			ROS_INFO_STREAM("Serial Port is not open");
+			ROS_FATAL_STREAM("Serial Port " << port << " is not open, shutting down");
+			ros::shutdown();
+			return;
 		}
 		run();
 	}
