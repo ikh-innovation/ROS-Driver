@@ -32,6 +32,7 @@ queryH:
   phase_amps: ?PHA
   temperatures: ?T
   cpu_usage: ?MCU
+  analog_input_1: "?AI 1"
 # amper_limit : ?ALIM
 # motor_amps2 : ?MA
 # motor_command2 : ?FM
